@@ -27,6 +27,22 @@ nav form button{border-right:0;border-left:2px solid #000}
 .content{flex:1;min-width:0}
 .content>.box:first-child{margin-top:0}
 @media(max-width:720px){.shell{flex-direction:column}.side{width:100%;display:flex;flex-wrap:wrap}.side a{border-bottom:0;border-right:1px solid #000}}
+.cols{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px;align-items:start}
+@media(max-width:900px){.cols{grid-template-columns:1fr}}
+.step{display:flex;border:2px solid #000;background:#fff}
+.step .no{background:#000;color:#fff;width:44px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.step .body{padding:8px 12px;flex:1;min-width:0}
+.step .tools{margin-top:4px}
+.step .tools code{border:1px solid #000;padding:0 4px;margin:0 4px 4px 0;display:inline-block}
+.conn{height:22px;border-left:2px solid #000;margin-left:21px;position:relative}
+.conn::after{content:'';position:absolute;bottom:-1px;left:-7px;border:6px solid transparent;border-top:8px solid #000;border-bottom:0}
+.branch{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+@media(max-width:900px){.branch{grid-template-columns:1fr}}
+.branch>div{border:2px solid #000;padding:8px}
+.branch .head{background:#000;color:#fff;margin:-8px -8px 6px;padding:4px 8px}
+.stop{border:2px dashed #000;padding:6px 10px;margin-top:8px}
+.trigger{border:2px solid #000;background:#000;color:#fff;padding:8px 12px}
+nav a.wf{border-right:0;border-left:2px solid #000}
 .bar{display:flex;align-items:center;gap:8px;margin:6px 0}
 .bar .label{width:42%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bar .track{flex:1;border:1px solid #000;height:16px}
@@ -129,6 +145,15 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    key: 'workflow',
+    label: '워크플로우',
+    href: '/workflow',
+    subs: [
+      { href: '/workflow', label: '흐름도' },
+      { href: '/workflow/doc', label: '운영 문서' },
+    ],
+  },
+  {
     key: 'log',
     label: '기록',
     href: '/log',
@@ -157,10 +182,11 @@ export const Layout: FC<PropsWithChildren<{ title: string; path?: string }>> = (
           {section ? (
             <>
               <nav>
-                {SECTIONS.map((sec) => (
+                {SECTIONS.filter((sec) => sec.key !== 'workflow').map((sec) => (
                   <a href={sec.href} class={sec.key === section.key ? 'on' : ''}>{sec.label}</a>
                 ))}
                 <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
+                <a href="/workflow" class={`wf${section.key === 'workflow' ? ' on' : ''}`}>워크플로우</a>
               </nav>
               <div class="shell">
                 {section.subs.length > 1 ? (
@@ -722,6 +748,187 @@ export const PoliciesNewPage: FC = () => (
   <Layout title="새 정책 문서" path="/policies/new">
     <PolicyForm />
     <div id="policy-list" />
+  </Layout>
+)
+
+// ---------- 워크플로우 ----------
+
+const Step: FC<PropsWithChildren<{ n: string; title: string; tools?: string[] }>> = ({ n, title, tools, children }) => (
+  <>
+    <div class="step">
+      <div class="no">{n}</div>
+      <div class="body">
+        <strong>{title}</strong>
+        <div>{children}</div>
+        {tools ? <div class="tools">{tools.map((t) => <code>{t}</code>)}</div> : null}
+      </div>
+    </div>
+    <div class="conn" />
+  </>
+)
+
+export const WorkflowPage: FC<{ settings: Settings; lastRecordAt: string | null; todayCount: number }> = ({ settings, lastRecordAt, todayCount }) => (
+  <Layout title="워크플로우" path="/workflow">
+    <section class="box">
+      <h2>매일 자정 자동 처리 흐름</h2>
+      <div class="in">
+        <p class="lead">Claude 클라우드 예약 작업이 매일 00:00(자정, 한국 시간)에 이 순서로 문의를 처리한다. 모든 단계는 이 서버의 MCP 도구로 이뤄진다.</p>
+        <p>
+          지금 상태: 읽기 전용 <span class="tag">{settings.readOnly ? '켜짐' : '꺼짐'}</span> 디버깅 모드{' '}
+          <span class="tag">{settings.debugMode ? '켜짐' : '꺼짐'}</span> 자동 전송 <span class="tag">{settings.autoSendEnabled ? '허용' : '꺼짐'}</span>
+        </p>
+        <p>마지막 디버깅 기록 {lastRecordAt ?? '아직 없음'}, 오늘 기록 {todayCount}건. 오늘 00시 이후 기록이 0건이면 예약 작업이 돌지 않았거나 처리할 문의가 없었던 것이다.</p>
+      </div>
+    </section>
+
+    <div class="cols">
+      <div class="flow">
+        <div class="trigger">매일 00:00 KST(자정). Claude 클라우드 예약 작업이 시작된다</div>
+        <div class="conn" />
+
+        <Step n="1" title="현황과 모드 확인" tools={['get_overview']}>
+          읽기 전용, 디버깅, 자동 전송 상태와 유효 템플릿, 정책 문서 수를 본다.
+          <div class="stop">읽기 전용이 켜져 있으면 미답변 문의 수만 세어 보고하고 여기서 끝낸다.</div>
+        </Step>
+
+        <Step n="2" title="지난 결과 점검" tools={['get_debug_summary', 'list_debug_records']}>
+          최근 디버깅 기록에서 어느 유형이 몰렸는지, 한 번도 안 쓰인 정책이 있는지, 템플릿이나 정책 근거 없이 쓴 답변이 많은지 본다.
+        </Step>
+
+        <Step n="3" title="스스로 개선" tools={['update_template', 'save_template', 'update_policy_doc', 'save_policy_doc']}>
+          부족한 가이드는 고치고 없는 유형은 새로 만든다. 정책 문서는 요약, 적용 상황, 태그, 구조만 정리한다. 의미는 바꾸지 않는다. 고칠 때마다 사유(editNote)를 적고 이전 내용은 이력에 남는다.
+        </Step>
+
+        <Step n="4" title="미답변 문의 읽기" tools={['list_pending_questions']}>
+          답변이 없는 문의를 1페이지부터 읽는다. 이메일과 전화번호는 내려오지 않는다.
+        </Step>
+
+        <Step n="5" title="문의마다 정책과 템플릿 찾기" tools={['search_policy_docs', 'list_policy_docs', 'get_policy_doc', 'list_active_templates']}>
+          정책이 걸린 문의(환불, 페이백, 일정, 가격)는 정책 전문을 읽는다. 맞는 템플릿 가이드를 고른다. 맞는 가이드가 없거나 애매하면 건드리지 않는다.
+        </Step>
+
+        <Step n="6" title="답변 작성">
+          가이드를 그대로 복사하지 않고 그 문의의 상황과 말투에 맞춰 직접 쓴다. 확인하지 못한 환불, 환급 가능 여부는 단정하지 않는다.
+        </Step>
+
+        <Step n="7" title="기록 또는 전송" tools={['reply_question']}>
+          참고한 템플릿 번호와 근거 정책 번호를 같이 넘긴다. 서버가 모드에 따라 처리한다.
+          <div class="branch">
+            <div>
+              <div class="head">디버깅 모드 켜짐</div>
+              유저에게 보내지 않는다. 문의, 템플릿, 근거 정책, 쓴 답변, 운영이었다면 결과를 기록만 한다.
+            </div>
+            <div>
+              <div class="head">디버깅 꺼짐, 조건 통과</div>
+              자동 전송 허용, 유효한 템플릿, 템플릿의 자동 전송 허용, 하루 상한 이내일 때만 실제로 보낸다.
+            </div>
+            <div>
+              <div class="head">그 밖의 경우</div>
+              초안으로 저장한다. 사람이 대시보드 기록에서 확인하고 보내거나 버린다.
+            </div>
+          </div>
+        </Step>
+
+        <Step n="8" title="보고">
+          답변한 문의, 건너뛴 문의와 이유, 템플릿과 정책을 어떻게 고쳤는지를 짧게 보고한다.
+        </Step>
+
+        <div class="trigger">끝. 다음 실행은 내일 00:00</div>
+      </div>
+
+      <div>
+        <section class="box">
+          <h2>사람이 하는 일</h2>
+          <div class="in">
+            <p>설정: 읽기 전용, 디버깅 모드, 자동 전송 허용, 하루 상한, 답변 끝 문구. AI 는 바꿀 수 없다.</p>
+            <p>템플릿의 자동 전송 허용: 대시보드 템플릿 목록에서만 켠다.</p>
+            <p>정책 원문: 호정님과 경지님이 정한다. AI 가 정리한 내용은 수정 이력에서 되돌린다.</p>
+            <p>정책 삭제: 사람만 한다.</p>
+            <p>초안: 기록 메뉴에서 확인해 보내거나 버린다. 디버깅 모드가 켜져 있으면 보낼 수 없다.</p>
+          </div>
+        </section>
+        <section class="box">
+          <h2>매일 확인할 곳</h2>
+          <div class="in">
+            <p>디버깅 경과: 어제와 오늘 몇 건이 어느 유형이었는지, 운영이었다면 자동 전송과 초안 비율.</p>
+            <p>디버깅 기록 목록: 문의와 쓴 답변을 읽고 어긋난 것을 찾는다.</p>
+            <p>정책 문서: AI 가 고친 것이 있으면 마지막 수정이 AI 로 표시된다.</p>
+          </div>
+        </section>
+        <section class="box">
+          <h2>안전장치</h2>
+          <div class="in">
+            <p>이미 답변이 달린 문의와 이미 전송한 문의에는 쓰지 않는다.</p>
+            <p>답변이 유저에게 나가는 통로는 하나이고, 디버깅 모드에서는 그 통로가 막힌다.</p>
+            <p>MCP 에는 정책과 템플릿의 삭제 도구가 없고 정책 담당자와 원문 주소는 바꿀 수 없다.</p>
+          </div>
+        </section>
+      </div>
+    </div>
+  </Layout>
+)
+
+export const WorkflowDocPage: FC<{ settings: Settings }> = ({ settings }) => (
+  <Layout title="운영 문서" path="/workflow/doc">
+    <section class="box">
+      <h2>목적</h2>
+      <div class="in">
+        <p>챌린지 1:1 문의에 AI 가 운영정책과 답변 가이드를 근거로 답하게 하고, 그 과정을 기록해서 사람이 믿을 만한지 확인한 뒤에 자동 전송 범위를 넓힌다.</p>
+        <p>지금은 {settings.debugMode ? '디버깅 모드가 켜져 있어 유저에게는 아무것도 나가지 않는다. 2주 정도 기록을 보며 판단한다.' : '디버깅 모드가 꺼져 있다. 조건을 통과한 답변은 유저에게 나갈 수 있다.'}</p>
+      </div>
+    </section>
+
+    <section class="box">
+      <h2>실행 일정</h2>
+      <div class="in">
+        <p>매일 00:00(자정, 한국 시간)에 Claude 클라우드 예약 작업이 실행된다. 작업 내용은 연결 메뉴의 예약 실행 프롬프트와 같다.</p>
+        <p>예약 설정의 시간대가 한국 시간이 아니면 환산해서 맞춘다. 한국 00:00 은 UTC 로 전날 15:00 이다.</p>
+        <p>예약 작업은 이 서버의 MCP 로만 문의를 읽고 쓴다. 인증 키는 Claude 클라우드 환경의 네트워크 시크릿에 넣어 두며 Claude 는 값을 보지 못한다.</p>
+        <p>실행됐는지는 디버깅 경과의 날짜별 건수로 본다. 그날 00시 이후 기록이 없는 날은 실행되지 않았거나 처리할 문의가 없었던 날이다.</p>
+      </div>
+    </section>
+
+    <section class="box">
+      <h2>단계별 설명</h2>
+      <div class="in">
+        <p>1. 현황 확인: get_overview 로 모드와 현황을 읽는다. 읽기 전용이면 쓰기 도구가 보이지 않으므로 문의 수만 보고하고 끝난다.</p>
+        <p>2. 지난 결과 점검: get_debug_summary 와 list_debug_records 로 어제까지의 기록을 본다. 정책 사용 현황에서 한 번도 안 쓰인 정책과 근거 없는 답변을 찾는다.</p>
+        <p>3. 개선: 템플릿은 update_template, save_template 으로, 정책 문서는 update_policy_doc, save_policy_doc 으로 정리한다. 정책은 의미를 바꾸지 않고 editNote 에 이유를 적는다. 이전 내용은 정책 수정 이력에 남는다.</p>
+        <p>4. 문의 읽기: list_pending_questions 로 미답변 문의를 읽는다. 페이지는 1부터 시작한다.</p>
+        <p>5. 정책과 템플릿 찾기: 정책이 걸린 문의는 search_policy_docs 나 list_policy_docs 로 문서를 찾고 get_policy_doc 으로 전문을 읽는다. 조건과 예외가 본문 안에 있어 요약만 보고 답하지 않는다.</p>
+        <p>6. 답변 작성: 가이드를 참고해 문의에 맞게 직접 쓴다.</p>
+        <p>7. 기록 또는 전송: reply_question 에 templateId 와 policyIds 를 넣는다. 결과는 아래 모드별 규칙을 따른다.</p>
+        <p>8. 보고: 처리한 문의, 건너뛴 문의와 이유, 고친 템플릿과 정책을 요약한다.</p>
+      </div>
+    </section>
+
+    <section class="box">
+      <h2>모드별 동작</h2>
+      <div class="in">
+        <p>읽기 전용 켜짐: 쓰기 도구가 사라진다. 읽기와 경과 조회만 된다.</p>
+        <p>디버깅 모드 켜짐: 답변은 유저에게 가지 않고 기록만 된다. 이때 운영이었다면 자동 전송이었을지 초안이었을지도 함께 남는다. 전역 자동 전송이 꺼져 있어도 켜졌다고 가정해 판단한다.</p>
+        <p>디버깅 모드 꺼짐: 자동 전송 허용, 유효한 템플릿, 템플릿의 자동 전송 허용, 하루 상한 이내를 모두 만족하는 답변만 전송된다. 나머지는 초안이다.</p>
+      </div>
+    </section>
+
+    <section class="box">
+      <h2>자동 전송으로 넘어가는 기준 (제안)</h2>
+      <div class="in">
+        <p>디버깅 경과에서 어떤 유형이 운영이었다면 자동 전송으로 집계되고, 기록 목록의 답변이 정책과 어긋나지 않는지 사람이 확인한다.</p>
+        <p>어긋남이 없는 유형의 템플릿만 템플릿 목록에서 자동 전송을 허용한다. 환불, 환급처럼 판단이 필요한 유형은 초안으로 둔다.</p>
+        <p>그다음 설정에서 디버깅 모드를 끄고 자동 전송을 허용한다. 처음에는 하루 상한을 작게 둔다.</p>
+      </div>
+    </section>
+
+    <section class="box">
+      <h2>문제가 생겼을 때</h2>
+      <div class="in">
+        <p>기록이 0건이다: 예약 작업이 실행되지 않았거나 키가 맞지 않다. 연결 메뉴에서 키와 주소를 확인한다.</p>
+        <p>문의 목록이 비어 있다: 어드민 계정 권한이나 렛츠 API 주소를 환경 메뉴에서 확인한다.</p>
+        <p>정책이 이상하게 바뀌었다: 정책 메뉴의 수정 이력에서 이전 내용으로 되돌린다.</p>
+        <p>급히 멈춰야 한다: 설정에서 읽기 전용을 켠다. 다음 실행부터 쓰기가 막힌다.</p>
+      </div>
+    </section>
   </Layout>
 )
 

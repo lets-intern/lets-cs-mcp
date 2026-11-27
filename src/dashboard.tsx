@@ -58,6 +58,8 @@ import {
   TemplateItem,
   TemplatesNewPage,
   TemplatesPage,
+  WorkflowDocPage,
+  WorkflowPage,
 } from './views.js'
 
 const COOKIE = 'cs_session'
@@ -330,6 +332,24 @@ export function dashboard(d: DashboardDeps) {
       now(),
     )
     return p ? c.html(<PolicyItem p={p} />) : c.body(null, 404)
+  })
+
+  app.get('/workflow', async (c) => {
+    const { db, now } = await d.getDeps()
+    const settings = await getSettings(db)
+    const latest = (await listDebugRecords(db, '2000-01-01', 1))[0]
+    return c.html(
+      <WorkflowPage
+        settings={settings}
+        lastRecordAt={latest?.updatedAt ?? null}
+        todayCount={await countRepliesToday(db, todayKst(now()), 'simulated')}
+      />,
+    )
+  })
+
+  app.get('/workflow/doc', async (c) => {
+    const { db } = await d.getDeps()
+    return c.html(<WorkflowDocPage settings={await getSettings(db)} />)
   })
 
   const debugWindow = async (c: Context) => {
