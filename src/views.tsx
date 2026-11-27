@@ -19,6 +19,15 @@ nav form button{border-right:0;border-left:2px solid #000}
 .content{flex:1;min-width:0}
 .content>.box:first-child{margin-top:0}
 @media(max-width:720px){.shell{flex-direction:column}.side{width:100%;display:flex;flex-wrap:wrap}.side a{border-bottom:0;border-right:1px solid #000}}
+.bar{display:flex;align-items:center;gap:8px;margin:6px 0}
+.bar .label{width:42%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .track{flex:1;border:1px solid #000;height:16px}
+.bar .fill{background:#000;height:100%}
+.bar .n{width:36px;text-align:right}
+.split{display:flex;border:2px solid #000;height:28px;margin:8px 0}
+.split .a{background:#000}
+.hint{border:2px solid #000;padding:8px 12px;margin:0 0 8px}
+.lead{margin:0 0 8px}
 .box{border:2px solid #000;margin:16px 0;background:#fff}
 .box>h2,.box>header{margin:0;padding:6px 12px;background:#000;color:#fff;font-size:14px;font-weight:normal;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .in{padding:12px}
@@ -438,10 +447,29 @@ const DaysBar: FC<{ base: string; days: number }> = ({ base, days }) => (
   </div>
 )
 
+const Bars: FC<{ rows: [string, number][] }> = ({ rows }) => {
+  const max = Math.max(1, ...rows.map(([, n]) => n))
+  return (
+    <div>
+      {rows.map(([label, n]) => (
+        <div class="bar">
+          <span class="label" title={label}>{label}</span>
+          <span class="track"><span class="fill" style={`display:block;width:${Math.max(3, Math.round((n / max) * 100))}%`} /></span>
+          <span class="n">{n}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export const DebugSummaryPage: FC<{ records: Reply[]; days: number; debugMode: boolean; since: string }> = ({ records, days, debugMode, since }) => {
-  const byIntended = count(records.map((r) => (r.intended === 'send' ? '운영이었다면 자동 전송' : '운영이었다면 초안')))
+  const total = records.length
+  const autoCount = records.filter((r) => r.intended === 'send').length
+  const draftCount = total - autoCount
+  const noTemplate = records.filter((r) => !r.templateId).length
   const byTemplate = count(records.map((r) => r.templateTitle ?? '템플릿 없이 작성'))
-  const byDay = count(records.map((r) => r.updatedAt.slice(0, 10))).sort((a, b) => (a[0] < b[0] ? 1 : -1))
+  const byDay = count(records.map((r) => r.updatedAt.slice(0, 10))).sort((a, b) => (a[0] > b[0] ? 1 : -1))
+  const pct = (n: number) => (total === 0 ? 0 : Math.round((n / total) * 100))
   return (
     <Layout title="디버깅 경과" path="/debug">
       <section class="box">
@@ -450,17 +478,53 @@ export const DebugSummaryPage: FC<{ records: Reply[]; days: number; debugMode: b
         </h2>
         <div class="in">
           <DaysBar base="/debug" days={days} />
-          <p>{since} 부터 기록 {records.length}건. 유저에게는 아무것도 보내지 않았다.</p>
+          <p class="lead">{since} 부터 오늘까지. 유저에게는 아무것도 보내지 않았다. 아래는 AI 가 문의에 단 답변을 기록해 센 결과다.</p>
+          <div class="stats" style="margin-top:8px">
+            <div class="box"><h2>기록</h2><div class="in"><strong>{total}</strong>건</div></div>
+            <div class="box"><h2>운영이었다면 자동 전송</h2><div class="in"><strong>{autoCount}</strong>{pct(autoCount)}%</div></div>
+            <div class="box"><h2>운영이었다면 초안</h2><div class="in"><strong>{draftCount}</strong>{pct(draftCount)}%</div></div>
+            <div class="box"><h2>템플릿 없이 작성</h2><div class="in"><strong>{noTemplate}</strong>건</div></div>
+          </div>
         </div>
       </section>
-      {records.length === 0 ? (
+
+      {total === 0 ? (
         <section class="box"><div class="in"><p>이 기간에 디버깅 기록이 없다. 읽기 전용을 끄고 MCP 로 답변을 달면 여기에 쌓인다.</p></div></section>
       ) : (
-        <div class="stats" style="grid-template-columns:repeat(3,1fr)">
-          <div class="box"><h2>운영이었다면</h2><div class="in">{byIntended.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
-          <div class="box"><h2>참고한 템플릿</h2><div class="in">{byTemplate.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
-          <div class="box"><h2>날짜별</h2><div class="in">{byDay.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
-        </div>
+        <>
+          <section class="box">
+            <h2>운영이었다면 어떻게 처리됐나</h2>
+            <div class="in">
+              <p class="lead">디버깅 모드가 아니었다면 자동 전송으로 나갔을 답변과 사람 확인이 필요한 초안의 비율이다.</p>
+              <div class="split" title={`자동 전송 ${autoCount} / 초안 ${draftCount}`}>
+                <span class="a" style={`width:${pct(autoCount)}%`} />
+              </div>
+              <p>검은 부분 자동 전송 {autoCount}건 ({pct(autoCount)}%), 흰 부분 초안 {draftCount}건 ({pct(draftCount)}%)</p>
+              {autoCount === 0 ? (
+                <p class="hint">
+                  자동 전송 후보가 하나도 없다. 템플릿의 자동 전송이 모두 꺼져 있기 때문이다. 위험이 낮은 템플릿(자료 위치, 미션 제출 방법 등)만
+                  템플릿 → 목록에서 자동 전송을 허용하면 그 유형이 여기에 자동 전송으로 집계된다. 디버깅 모드가 켜져 있어 허용해도 유저에게는 나가지 않는다.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section class="box">
+            <h2>어떤 유형이 많았나</h2>
+            <div class="in">
+              <p class="lead">답변에 참고한 템플릿별 건수다. 한 곳에 몰리면 나누고, 템플릿 없이 쓴 문의가 많으면 새 템플릿이 필요하다.</p>
+              <Bars rows={byTemplate} />
+            </div>
+          </section>
+
+          <section class="box">
+            <h2>날짜별</h2>
+            <div class="in">
+              <p class="lead">하루에 몇 건을 처리했는지다. 0건인 날은 예약 실행이 돌지 않은 것이다.</p>
+              <Bars rows={byDay} />
+            </div>
+          </section>
+        </>
       )}
     </Layout>
   )

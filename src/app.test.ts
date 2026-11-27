@@ -269,9 +269,12 @@ describe('대시보드', () => {
     await submitReply(deps, { challengeId: 10, questionId: 1, body: '부분 환불만 가능합니다', templateId: t.id, mode: 'send' })
 
     const summary = await (await app.request('/debug', { headers: { cookie } })).text()
-    expect(summary).toContain('기록 1건')
-    expect(summary).toContain('환불 안내: 1')
-    expect(summary).toContain('운영이었다면 자동 전송: 1')
+    expect(summary).toContain('<strong>1</strong>건') // 기록 1건
+    expect(summary).toContain('운영이었다면 자동 전송')
+    expect(summary).toContain('환불 안내')
+    expect(summary).toContain('class="split"')
+    expect(summary).toContain('class="bar"')
+    expect(summary).not.toContain('자동 전송 후보가 하나도 없다') // 자동 전송 1건이 있으므로 안내가 없다
     expect(summary).toContain('유저에게는 아무것도 보내지 않았다')
 
     const records = await (await app.request('/debug/records', { headers: { cookie } })).text()
