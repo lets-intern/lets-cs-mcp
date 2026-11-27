@@ -323,12 +323,13 @@ export const SettingsBox: FC<{ settings: Settings; saved?: boolean }> = ({ setti
   </section>
 )
 
-export const InfoBox: FC<{ apiBase: string; dbKind: string }> = ({ apiBase, dbKind }) => (
+export const InfoBox: FC<{ apiBase: string; dbKind: string; dbCreatedAt: string }> = ({ apiBase, dbKind, dbCreatedAt }) => (
   <section class="box">
     <h2>환경</h2>
     <div class="in">
       <p>렛츠 API: {apiBase}</p>
       <p>저장소: {dbKind}</p>
+      <p>이 DB 가 처음 열린 시각: {dbCreatedAt}</p>
       <p>키와 대시보드 비밀번호는 환경 변수 MCP_AUTH_TOKEN, DASHBOARD_PASSWORD 로 바꾼다.</p>
     </div>
   </section>
@@ -586,6 +587,6 @@ export const SettingsModePage: FC<{ settings: Settings }> = ({ settings }) => (
 export const SettingsSendPage: FC<{ settings: Settings }> = ({ settings }) => (
   <Layout title="전송 설정" path="/settings/send"><SettingsBox settings={settings} /></Layout>
 )
-export const SettingsEnvPage: FC<{ apiBase: string; dbKind: string }> = (p) => (
+export const SettingsEnvPage: FC<{ apiBase: string; dbKind: string; dbCreatedAt: string }> = (p) => (
   <Layout title="환경" path="/settings/env"><InfoBox {...p} /></Layout>
 )

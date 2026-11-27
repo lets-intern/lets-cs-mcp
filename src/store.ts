@@ -131,6 +131,11 @@ export async function getSettings(db: Db): Promise<Settings> {
   }
 }
 
+export async function getDbCreatedAt(db: Db): Promise<string> {
+  const res = await db.execute("SELECT value FROM settings WHERE key = 'db_created_at'")
+  return res.rows[0] ? String(res.rows[0].value) : '알 수 없음'
+}
+
 export async function saveSettings(db: Db, patch: Partial<Settings>): Promise<void> {
   const entries: [string, string][] = []
   if (patch.readOnly !== undefined) entries.push([SETTING_KEYS.readOnly, patch.readOnly ? '1' : '0'])

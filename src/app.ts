@@ -84,6 +84,6 @@ export function createAppFromEnv() {
     api: createLetsApi(env),
     getDb: once(openConfiguredDb),
     apiBase: env.LETS_API_BASE,
-    dbKind: dbUrl.startsWith('file:') ? '로컬 파일 (local.db)' : 'Turso',
+    dbKind: dbUrl.startsWith('file:') ? '로컬 파일 (local.db)' : `Turso (${new URL(dbUrl.replace(/^libsql:/, 'https:')).host})`,
   })
 }

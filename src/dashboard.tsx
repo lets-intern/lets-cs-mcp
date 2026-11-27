@@ -10,6 +10,7 @@ import {
   createTemplate,
   deleteTemplate,
   getReply,
+  getDbCreatedAt,
   getSettings,
   getTemplate,
   listActiveTemplates,
@@ -143,7 +144,10 @@ export function dashboard(d: DashboardDeps) {
     const { db } = await d.getDeps()
     return c.html(<SettingsSendPage settings={await getSettings(db)} />)
   })
-  app.get('/settings/env', (c) => c.html(<SettingsEnvPage apiBase={d.apiBase} dbKind={d.dbKind} />))
+  app.get('/settings/env', async (c) => {
+    const { db } = await d.getDeps()
+    return c.html(<SettingsEnvPage apiBase={d.apiBase} dbKind={d.dbKind} dbCreatedAt={await getDbCreatedAt(db)} />)
+  })
 
   app.post('/settings/read-only', async (c) => {
     const { db } = await d.getDeps()

@@ -1,4 +1,5 @@
 import type { Client } from '@libsql/client'
+import { kstNow } from './dates.js'
 
 export type Db = Client
 
@@ -54,5 +55,7 @@ export async function openDb(url: string, authToken?: string): Promise<Db> {
   for (const col of ['note', 'question_content', 'challenge_title', 'template_title', 'intended']) {
     if (!have.has(col)) await db.execute(`ALTER TABLE replies ADD COLUMN ${col} TEXT`)
   }
+  // 이 DB 가 처음 열린 시각. 배포마다 DB 가 비워지는지 확인하려고 남긴다.
+  await db.execute({ sql: "INSERT OR IGNORE INTO settings (key, value) VALUES ('db_created_at', ?)", args: [kstNow()] })
   return db
 }
