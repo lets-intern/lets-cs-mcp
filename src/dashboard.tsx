@@ -20,7 +20,7 @@ import {
   updateTemplate,
   type TemplateFields,
 } from './store.js'
-import { DryRunBox, HomePage, LoginPage, LogPage, LogRow, ReadOnlyBox, SettingsBox, TemplateForm, TemplateItem, TemplatePreview, TemplatesPage } from './views'
+import { DryRunBox, HomePage, LoginPage, LogPage, LogRow, ReadOnlyBox, SettingsBox, TemplateForm, TemplateItem, TemplatePreview, TemplatesPage } from './views.js'
 
 const COOKIE = 'cs_session'
 const WEEK = 7 * 24 * 60 * 60

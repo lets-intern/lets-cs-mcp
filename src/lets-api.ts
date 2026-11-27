@@ -1,6 +1,6 @@
 // 렛츠커리어 어드민 API 클라이언트. 이메일 로그인으로 토큰을 받아 캐시하고, 401 이면 한 번 다시 로그인한다.
 
-type Env = { LETS_API_BASE: string; LETS_ADMIN_EMAIL: string; LETS_ADMIN_PASSWORD: string }
+type Env = { LETS_API_BASE: string; LETS_ADMIN_EMAIL?: string; LETS_ADMIN_PASSWORD?: string }
 
 type Envelope<T> = { status: number; message?: string; data: T }
 
@@ -24,9 +24,8 @@ export type QuestionList = { questionList: Question[]; pageInfo: unknown }
 
 export function readEnv(source: Record<string, string | undefined> = process.env): Env {
   const { LETS_API_BASE, LETS_ADMIN_EMAIL, LETS_ADMIN_PASSWORD } = source
-  if (!LETS_API_BASE || !LETS_ADMIN_EMAIL || !LETS_ADMIN_PASSWORD) {
-    throw new Error('LETS_API_BASE, LETS_ADMIN_EMAIL, LETS_ADMIN_PASSWORD 가 필요하다')
-  }
+  if (!LETS_API_BASE) throw new Error('LETS_API_BASE 가 필요하다')
+  // 어드민 계정이 없어도 대시보드는 떠야 한다. 렛츠 API 를 부를 때 확인한다.
   return { LETS_API_BASE, LETS_ADMIN_EMAIL, LETS_ADMIN_PASSWORD }
 }
 
@@ -34,6 +33,9 @@ export function createLetsApi(env: Env, fetchImpl: typeof fetch = fetch) {
   let accessToken: string | null = null
 
   async function login() {
+    if (!env.LETS_ADMIN_EMAIL || !env.LETS_ADMIN_PASSWORD) {
+      throw new Error('어드민 계정(LETS_ADMIN_EMAIL, LETS_ADMIN_PASSWORD)이 설정되지 않았다')
+    }
     const res = await fetchImpl(`${env.LETS_API_BASE}/api/v2/user/signin`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

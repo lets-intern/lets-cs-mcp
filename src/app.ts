@@ -71,11 +71,18 @@ export function createAppFromEnv() {
   if (!authToken || !dashboardPassword) throw new Error('MCP_AUTH_TOKEN, DASHBOARD_PASSWORD 가 필요하다')
   const env = readEnv()
   const dbUrl = process.env.TURSO_DATABASE_URL ?? 'file:local.db'
+  // Vercel 의 파일 시스템은 쓸 수 없다. 로컬 파일로 조용히 떨어지지 않게 막는다.
+  const openConfiguredDb = () => {
+    if (process.env.VERCEL && dbUrl.startsWith('file:')) {
+      return Promise.reject(new Error('TURSO_DATABASE_URL 이 설정되지 않았다. Vercel 에서는 로컬 파일 DB 를 쓸 수 없다'))
+    }
+    return openDb(dbUrl, process.env.TURSO_AUTH_TOKEN)
+  }
   return createApp({
     authToken,
     dashboardPassword,
     api: createLetsApi(env),
-    getDb: once(() => openDb(dbUrl, process.env.TURSO_AUTH_TOKEN)),
+    getDb: once(openConfiguredDb),
     apiBase: env.LETS_API_BASE,
     dbKind: dbUrl.startsWith('file:') ? '로컬 파일 (local.db)' : 'Turso',
   })

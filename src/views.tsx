@@ -1,5 +1,5 @@
 import type { FC, PropsWithChildren } from 'hono/jsx'
-import { templateStatus, type Reply, type Settings, type Template, type TemplateStatus } from './store'
+import { templateStatus, type Reply, type Settings, type Template, type TemplateStatus } from './store.js'
 
 // 검정과 흰색만 쓴다. 모서리는 각지게, 구분은 테두리로만 한다.
 const css = `
