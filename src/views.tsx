@@ -51,7 +51,7 @@ document.addEventListener('click',function(e){
 });
 `
 
-type Tab = 'home' | 'templates' | 'log'
+type Tab = 'home' | 'templates' | 'debug' | 'log'
 
 export const Layout: FC<PropsWithChildren<{ title: string; active?: Tab }>> = ({ title, active, children }) => (
   <html lang="ko">
@@ -69,6 +69,7 @@ export const Layout: FC<PropsWithChildren<{ title: string; active?: Tab }>> = ({
           <nav>
             <a href="/" class={active === 'home' ? 'on' : ''}>대시보드</a>
             <a href="/templates" class={active === 'templates' ? 'on' : ''}>템플릿</a>
+            <a href="/debug" class={active === 'debug' ? 'on' : ''}>디버깅</a>
             <a href="/log" class={active === 'log' ? 'on' : ''}>기록</a>
             <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
           </nav>
@@ -123,39 +124,39 @@ export const ReadOnlyBox: FC<{ readOnly: boolean }> = ({ readOnly }) => (
   </section>
 )
 
-export const DryRunBox: FC<{ dryRun: boolean }> = ({ dryRun }) => (
-  <section class="box" id="dry-box">
+export const DebugBox: FC<{ debugMode: boolean }> = ({ debugMode }) => (
+  <section class="box" id="debug-box">
     <h2>
-      가상 전송 모드 <span class="tag">{dryRun ? '켜짐' : '꺼짐'}</span>
+      디버깅 모드 <span class="tag">{debugMode ? '켜짐' : '꺼짐'}</span>
     </h2>
     <div class="in">
       <p>
-        {dryRun
-          ? '자동 전송 조건을 모두 통과해도 실제로는 보내지 않는다. 대신 "이 문구가 나갔을 것이다" 를 기록 화면에 가상 전송으로 남긴다. 기록을 보고 괜찮으면 거기서 실제 전송하거나, 이 모드를 끈다.'
-          : '꺼져 있다. 자동 전송 조건을 통과한 답변은 실제로 고객에게 나간다.'}
+        {debugMode
+          ? '유저에게는 아무것도 보내지 않는다. MCP 에서도 대시보드에서도 막혀 있다. 답변은 문의 내용, 참고한 템플릿, 쓴 답변과 함께 기록만 하고, 운영이었다면 자동 전송이었을지 초안이었을지도 남긴다. 이때 자동 전송 설정은 켜졌다고 가정해 판단한다. 경과는 디버깅 탭에서 본다.'
+          : '꺼져 있다. 조건을 통과한 답변은 실제로 유저에게 나간다.'}
       </p>
       <div class="actions">
         <button
-          class={dryRun ? 'on' : ''}
-          hx-post="/settings/dry-run"
-          hx-vals={JSON.stringify({ value: dryRun ? '0' : '1' })}
-          hx-target="#dry-box"
+          class={debugMode ? 'on' : ''}
+          hx-post="/settings/debug"
+          hx-vals={JSON.stringify({ value: debugMode ? '0' : '1' })}
+          hx-target="#debug-box"
           hx-swap="outerHTML"
-          hx-confirm={dryRun ? '가상 전송을 끈다. 이후 자동 전송은 실제로 나간다. 계속할까?' : undefined}
+          hx-confirm={debugMode ? '디버깅 모드를 끈다. 이후 자동 전송 조건을 통과한 답변은 실제로 유저에게 나간다. 계속할까?' : undefined}
         >
-          {dryRun ? '가상 전송 끄기 (실제로 전송)' : '가상 전송 켜기'}
+          {debugMode ? '디버깅 모드 끄기 (실제 전송 가능)' : '디버깅 모드 켜기'}
         </button>
       </div>
     </div>
   </section>
 )
 
-export const Stats: FC<{ activeTemplates: number; drafts: number; sentToday: number; simulatedToday: number; maxSendPerDay: number }> = (p) => (
+export const Stats: FC<{ activeTemplates: number; drafts: number; sentToday: number; debugToday: number; maxSendPerDay: number }> = (p) => (
   <div class="stats">
     <div class="box"><h2>유효 템플릿</h2><div class="in"><strong>{p.activeTemplates}</strong></div></div>
     <div class="box"><h2>대기 중 초안</h2><div class="in"><strong>{p.drafts}</strong></div></div>
     <div class="box"><h2>오늘 전송</h2><div class="in"><strong>{p.sentToday} / {p.maxSendPerDay}</strong></div></div>
-    <div class="box"><h2>오늘 가상 전송</h2><div class="in"><strong>{p.simulatedToday}</strong></div></div>
+    <div class="box"><h2>오늘 디버깅 기록</h2><div class="in"><strong>{p.debugToday}</strong></div></div>
   </div>
 )
 
@@ -171,11 +172,12 @@ const mask = (key: string) => key.slice(0, 4) + '*'.repeat(12)
 
 export const SCHEDULE_PROMPT = [
   'lets-cs MCP 로 챌린지 문의를 처리한다.',
-  '1. list_active_templates 로 오늘 유효한 템플릿을 읽는다. readOnly 가 true 면 미답변 문의 수만 세어 보고하고 끝낸다.',
+  '1. list_active_templates 로 오늘 유효한 템플릿(가이드)을 읽는다. readOnly 가 true 면 미답변 문의 수만 세어 보고하고 끝낸다.',
   '2. list_pending_questions 로 미답변 문의를 읽는다.',
-  '3. 문의에 맞는 템플릿이 분명히 하나일 때만, 본문의 {{변수}} 를 문의 값(userName, challengeTitle 등)으로 모두 치환해 reply_question 을 부른다. 템플릿의 autoSend 가 true 면 mode 를 send, 아니면 draft 로 한다. templateId 를 항상 넣는다.',
-  '4. 맞는 템플릿이 없거나 애매하면 건드리지 않는다.',
-  '5. 마지막에 처리한 문의, 건너뛴 문의와 그 이유를 짧게 보고한다.',
+  '3. 문의 하나씩 내용을 읽고 맞는 템플릿 가이드를 고른다. 가이드 문구를 그대로 복사하지 말고, 그 문의의 상황과 말투에 맞춰 직접 답변을 쓴다. 확인하지 못한 환불, 환급 가능 여부는 단정하지 않는다.',
+  '4. reply_question 을 부른다. 참고한 템플릿 id 를 templateId 에 넣고, 템플릿의 autoSend 가 true 면 mode 를 send, 아니면 draft 로 한다. debugMode 가 true 면 유저에게 가지 않고 기록만 되니 평소처럼 진행한다.',
+  '5. 맞는 템플릿이 없거나 애매하면 건드리지 않는다.',
+  '6. 마지막에 답변한 문의, 건너뛴 문의와 그 이유를 짧게 보고한다.',
 ].join('\n')
 
 export const ConnectBox: FC<{ origin: string; token: string }> = ({ origin, token }) => {
@@ -211,7 +213,7 @@ export const SettingsBox: FC<{ settings: Settings; saved?: boolean }> = ({ setti
     <form class="in" hx-post="/settings" hx-target="#settings-box" hx-swap="outerHTML">
       <label class="inline">
         <input type="checkbox" name="autoSendEnabled" checked={settings.autoSendEnabled} />
-        자동 전송 허용 (끄면 mode=send 도 모두 초안으로 저장된다. 켜도 가상 전송이 켜져 있으면 실제로는 보내지 않는다)
+        자동 전송 허용 (끄면 mode=send 도 모두 초안으로 저장된다. 켜도 디버깅 모드가 켜져 있으면 실제로는 보내지 않는다)
       </label>
       <label for="maxSendPerDay">하루 전송 상한</label>
       <input id="maxSendPerDay" name="maxSendPerDay" type="number" min="1" max="200" value={settings.maxSendPerDay} />
@@ -256,9 +258,7 @@ export const TemplateItem: FC<{ t: Template; today: string }> = ({ t, today }) =
       <div class="in">
         <p>상황: {t.situation}</p>
         <pre>{t.body}</pre>
-        <div id={`preview-${t.id}`} />
         <div class="actions">
-          <button hx-get={`/templates/${t.id}/preview`} hx-target={`#preview-${t.id}`} hx-swap="innerHTML">미리보기</button>
           <button hx-get={`/templates/${t.id}/edit`} hx-target={`#tpl-${t.id}`} hx-swap="outerHTML">수정</button>
           <button hx-post={`/templates/${t.id}/toggle`} hx-target={`#tpl-${t.id}`} hx-swap="outerHTML">
             {t.enabled ? '끄기' : '켜기'}
@@ -277,28 +277,19 @@ export const TemplateItem: FC<{ t: Template; today: string }> = ({ t, today }) =
   )
 }
 
-export const TemplatePreview: FC<{ text: string; sample: Record<string, string> }> = ({ text, sample }) => (
-  <div class="muted">
-    <p>
-      미리보기 (샘플 값 {Object.entries(sample).map(([k, v]) => `${k}=${v}`).join(', ')}, 답변 끝 문구 포함). 저장되지 않는다.
-    </p>
-    <pre>{text}</pre>
-  </div>
-)
-
 export const TemplateForm: FC<{ t?: Template }> = ({ t }) => {
   const attrs = t
     ? { 'hx-put': `/templates/${t.id}`, 'hx-target': `#tpl-${t.id}`, 'hx-swap': 'outerHTML' }
     : { 'hx-post': '/templates', 'hx-target': '#tpl-list', 'hx-swap': 'afterbegin', 'hx-on::after-request': 'if(event.detail.successful)this.reset()' }
   return (
     <form class="box" id={t ? `tpl-${t.id}` : 'tpl-new'} {...attrs}>
-      <h2>{t ? '템플릿 수정' : '새 템플릿'}</h2>
+      <h2>{t ? '템플릿 수정' : '새 템플릿 (답변 가이드)'}</h2>
       <div class="in">
         <label>제목 (상황 이름)</label>
         <input name="title" required value={t?.title ?? ''} />
-        <label>이 답변을 쓸 상황 (Claude 가 이 설명을 보고 고른다)</label>
+        <label>이 가이드를 쓸 상황 (Claude 가 이 설명을 보고 고른다)</label>
         <textarea name="situation" rows={2} required>{t?.situation ?? ''}</textarea>
-        <label>답변 본문. 변수는 {'{{userName}}'}, {'{{challengeTitle}}'} 처럼 쓴다</label>
+        <label>답변 가이드. 이 문구를 그대로 보내지 않는다. Claude 가 문의에 맞춰 참고해 직접 쓴다</label>
         <textarea name="body" rows={6} required>{t?.body ?? ''}</textarea>
         <div class="row">
           <div><label>챌린지 id (비우면 전체)</label><input name="challengeId" type="number" min="1" value={t?.challengeId ?? ''} /></div>
@@ -325,11 +316,73 @@ export const TemplatesPage: FC<{ templates: Template[]; today: string }> = ({ te
   </Layout>
 )
 
+
+const DAY_OPTIONS = [7, 14, 30]
+
+const count = (items: string[]) => {
+  const m = new Map<string, number>()
+  for (const k of items) m.set(k, (m.get(k) ?? 0) + 1)
+  return [...m.entries()].sort((a, b) => b[1] - a[1])
+}
+
+export const DebugPage: FC<{ records: Reply[]; days: number; debugMode: boolean; since: string }> = ({ records, days, debugMode, since }) => {
+  const byIntended = count(records.map((r) => (r.intended === 'send' ? '운영이었다면 자동 전송' : '운영이었다면 초안')))
+  const byTemplate = count(records.map((r) => r.templateTitle ?? '템플릿 없이 작성'))
+  const byDay = count(records.map((r) => r.updatedAt.slice(0, 10))).sort((a, b) => (a[0] < b[0] ? 1 : -1))
+  return (
+    <Layout title="디버깅" active="debug">
+      <section class="box">
+        <h2>
+          디버깅 경과 <span class="tag">{debugMode ? '디버깅 모드 켜짐' : '디버깅 모드 꺼짐'}</span>
+        </h2>
+        <div class="in">
+          <div class="actions">
+            {DAY_OPTIONS.map((d) => (
+              <a class={`btn${d === days ? ' on' : ''}`} href={`/debug?days=${d}`}>최근 {d}일</a>
+            ))}
+          </div>
+          <p>{since} 부터 기록 {records.length}건. 유저에게는 아무것도 보내지 않았다.</p>
+          {records.length > 0 ? (
+            <div class="stats">
+              <div class="box"><h2>운영이었다면</h2><div class="in">{byIntended.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
+              <div class="box"><h2>참고한 템플릿</h2><div class="in">{byTemplate.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
+              <div class="box"><h2>날짜별</h2><div class="in">{byDay.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
+            </div>
+          ) : null}
+        </div>
+      </section>
+      {records.length === 0 ? (
+        <section class="box"><div class="in"><p>이 기간에 디버깅 기록이 없다. 읽기 전용을 끄고 MCP 로 답변을 달면 여기에 쌓인다.</p></div></section>
+      ) : (
+        records.map((r) => (
+          <article class="box">
+            <header>
+              <strong>문의 #{r.questionId}</strong>
+              <span class="tag">{r.updatedAt}</span>
+              <span class="tag">{r.challengeTitle ?? `챌린지 ${r.challengeId}`}</span>
+              {r.userName ? <span class="tag">{r.userName}</span> : null}
+              <span class="tag">{r.templateTitle ? `템플릿: ${r.templateTitle}` : '템플릿 없음'}</span>
+              <span class="tag">{r.intended === 'send' ? '운영이었다면 자동 전송' : '운영이었다면 초안'}</span>
+            </header>
+            <div class="in">
+              <p>문의: {r.questionTitle}</p>
+              <pre>{r.questionContent ?? '(문의 내용이 기록되지 않았다)'}</pre>
+              <p>단 답변 (유저에게 보내지 않음)</p>
+              <pre>{r.body}</pre>
+              {r.note ? <p>사유: {r.note}</p> : null}
+            </div>
+          </article>
+        ))
+      )}
+    </Layout>
+  )
+}
+
 // ---------- 기록 ----------
 
-const REPLY_LABEL: Record<Reply['status'], string> = { draft: '초안', simulated: '가상 전송', sent: '전송됨', failed: '실패', discarded: '버림' }
+const REPLY_LABEL: Record<Reply['status'], string> = { draft: '초안', simulated: '디버깅 기록', sent: '전송됨', failed: '실패', discarded: '버림' }
 
-export const LogRow: FC<{ r: Reply; note?: string }> = ({ r, note }) => (
+export const LogRow: FC<{ r: Reply; note?: string; canSend?: boolean }> = ({ r, note, canSend = true }) => (
   <tr id={`reply-${r.id}`}>
     <td>{REPLY_LABEL[r.status]}</td>
     <td>#{r.questionId}{r.userName ? ` ${r.userName}` : ''}</td>
@@ -337,15 +390,16 @@ export const LogRow: FC<{ r: Reply; note?: string }> = ({ r, note }) => (
     <td>
       <pre>{r.body}</pre>
       {r.error ? <p>오류: {r.error}</p> : null}
-      {r.status === 'simulated' ? <p>실제로는 보내지 않았다. 보냈다면 위 문구가 나갔을 것이다.</p> : null}
       {r.note ? <p>사유: {r.note}</p> : null}
       {note ? <p>{note}</p> : null}
     </td>
     <td>{r.updatedAt}</td>
     <td>
-      {r.status === 'draft' || r.status === 'simulated' ? (
+      {r.status === 'draft' ? (
         <div class="actions">
-          <button hx-post={`/replies/${r.id}/send`} hx-target={`#reply-${r.id}`} hx-swap="outerHTML" hx-confirm="고객에게 이 답변을 실제로 보낸다. 계속할까?">{r.status === 'simulated' ? '실제 전송' : '전송'}</button>
+          {canSend ? (
+            <button hx-post={`/replies/${r.id}/send`} hx-target={`#reply-${r.id}`} hx-swap="outerHTML" hx-confirm="고객에게 이 답변을 실제로 보낸다. 계속할까?">전송</button>
+          ) : null}
           <button hx-post={`/replies/${r.id}/discard`} hx-target={`#reply-${r.id}`} hx-swap="outerHTML">버리기</button>
         </div>
       ) : null}
@@ -353,7 +407,7 @@ export const LogRow: FC<{ r: Reply; note?: string }> = ({ r, note }) => (
   </tr>
 )
 
-export const LogPage: FC<{ replies: Reply[] }> = ({ replies }) => (
+export const LogPage: FC<{ replies: Reply[]; canSend: boolean }> = ({ replies, canSend }) => (
   <Layout title="기록" active="log">
     <section class="box">
       <h2>답변 기록</h2>
@@ -365,7 +419,7 @@ export const LogPage: FC<{ replies: Reply[] }> = ({ replies }) => (
             <thead>
               <tr><th>상태</th><th>문의</th><th>챌린지</th><th>본문</th><th>시각</th><th>작업</th></tr>
             </thead>
-            <tbody>{replies.map((r) => <LogRow r={r} />)}</tbody>
+            <tbody>{replies.map((r) => <LogRow r={r} canSend={canSend} />)}</tbody>
           </table>
         )}
       </div>
@@ -374,7 +428,7 @@ export const LogPage: FC<{ replies: Reply[] }> = ({ replies }) => (
 )
 
 export const HomePage: FC<{
-  stats: { activeTemplates: number; drafts: number; sentToday: number; simulatedToday: number; maxSendPerDay: number }
+  stats: { activeTemplates: number; drafts: number; sentToday: number; debugToday: number; maxSendPerDay: number }
   settings: Settings
   origin: string
   token: string
@@ -383,7 +437,7 @@ export const HomePage: FC<{
 }> = ({ stats, settings, origin, token, apiBase, dbKind }) => (
   <Layout title="대시보드" active="home">
     <ReadOnlyBox readOnly={settings.readOnly} />
-    <DryRunBox dryRun={settings.dryRun} />
+    <DebugBox debugMode={settings.debugMode} />
     <Stats {...stats} />
     <ConnectBox origin={origin} token={token} />
     <SettingsBox settings={settings} />

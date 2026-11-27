@@ -9,7 +9,7 @@ const dir = mkdtempSync(join(tmpdir(), 'lets-cs-db-'))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
 describe('DB 열기', () => {
-  it('note 컬럼이 없는 옛 DB 에도 컬럼을 붙이고, 다시 열어도 에러가 없다', async () => {
+  it('컬럼이 모자란 옛 DB 에도 없는 컬럼만 붙이고, 다시 열어도 에러가 없다', async () => {
     const url = `file:${join(dir, 'old.db')}`
     const old = createClient({ url })
     await old.execute(
@@ -19,7 +19,7 @@ describe('DB 열기', () => {
 
     const db = await openDb(url)
     const cols = (await db.execute('PRAGMA table_info(replies)')).rows.map((r) => r.name)
-    expect(cols).toContain('note')
+    for (const c of ['note', 'question_content', 'challenge_title', 'template_title', 'intended']) expect(cols).toContain(c)
     await expect(openDb(url)).resolves.toBeDefined()
   })
 })

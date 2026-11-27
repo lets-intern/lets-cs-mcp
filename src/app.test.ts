@@ -113,43 +113,66 @@ describe('대시보드', () => {
     expect(del.status).toBe(200)
   })
 
-  it('가상 전송 버튼과 미리보기, 가상 전송 기록의 사유가 보인다', async () => {
-    const { app, deps } = await setup()
+  it('디버깅 모드 버튼이 설정을 바꾼다', async () => {
+    const { app, db } = await setup()
+    const { getSettings } = await import('./store.js')
+    const cookie = await login(app)
+    const home = await (await app.request('/', { headers: { cookie } })).text()
+    expect(home).toContain('디버깅 모드')
+    const off = await app.request('/settings/debug', form(cookie, 'value=0'))
+    expect(await off.text()).toContain('디버깅 모드 켜기')
+    expect((await getSettings(db)).debugMode).toBe(false)
+    await app.request('/settings/debug', form(cookie, 'value=1'))
+    expect((await getSettings(db)).debugMode).toBe(true)
+  })
+
+  it('디버깅 탭에 문의, 템플릿, 쓴 답변, 운영이었다면의 결과가 쌓여 보인다', async () => {
+    const { app, deps, saved } = await setup()
     const { submitReply } = await import('./reply.js')
     const { createTemplate } = await import('./store.js')
     const cookie = await login(app)
 
-    const home = await (await app.request('/', { headers: { cookie } })).text()
-    expect(home).toContain('가상 전송 모드')
-    const off = await app.request('/settings/dry-run', form(cookie, 'value=0'))
-    expect(await off.text()).toContain('가상 전송 켜기')
-    await app.request('/settings/dry-run', form(cookie, 'value=1'))
+    const empty = await (await app.request('/debug', { headers: { cookie } })).text()
+    expect(empty).toContain('디버깅 기록이 없다')
 
-    await saveSettings(deps.db, { readOnly: false, autoSendEnabled: true, answerFooter: '드림' })
+    await saveSettings(deps.db, { readOnly: false })
     const t = await createTemplate(
       deps.db,
-      { title: '환불', situation: 's', body: '{{userName}}님 {{challengeTitle}} 안내', challengeId: null, validFrom: null, validUntil: null, autoSend: true, priority: 0 },
+      { title: '환불 안내', situation: 's', body: '가이드', challengeId: null, validFrom: null, validUntil: null, autoSend: true, priority: 0 },
       new Date(),
     )
-    const preview = await (await app.request(`/templates/${t.id}/preview`, { headers: { cookie } })).text()
-    expect(preview).toContain('홍길동님 샘플 챌린지 안내')
-    expect(preview).toContain('드림')
+    await submitReply(deps, { challengeId: 10, questionId: 1, body: '부분 환불만 가능합니다', templateId: t.id, mode: 'send' })
 
-    await submitReply(deps, { challengeId: 10, questionId: 1, body: '홍길동님 안내', templateId: t.id, mode: 'send' })
-    const log = await (await app.request('/log', { headers: { cookie } })).text()
-    expect(log).toContain('가상 전송')
-    expect(log).toContain('실제 전송')
-    expect(log).toContain(`사유: 자동 전송 조건 통과, 템플릿 #${t.id}`)
+    const page = await (await app.request('/debug', { headers: { cookie } })).text()
+    expect(page).toContain('환불하고 싶어요')
+    expect(page).toContain('템플릿: 환불 안내')
+    expect(page).toContain('부분 환불만 가능합니다')
+    expect(page).toContain('운영이었다면 자동 전송')
+    expect(page).toContain('유저에게는 아무것도 보내지 않았다')
+    expect(saved).toHaveLength(0)
+
+    const week = await app.request('/debug?days=7', { headers: { cookie } })
+    expect(week.status).toBe(200)
   })
 
   it('기록 화면에서 초안을 보낼 수 있다', async () => {
     const { app, deps, saved } = await setup()
     const { submitReply } = await import('./reply.js')
-    await saveSettings(deps.db, { readOnly: false })
+    await saveSettings(deps.db, { readOnly: false, debugMode: false })
     await submitReply(deps, { challengeId: 10, questionId: 1, body: '안내', mode: 'draft' })
     const cookie = await login(app)
     const log = await (await app.request('/log', { headers: { cookie } })).text()
     expect(log).toContain('초안')
+    expect(log).toContain('>전송<')
+
+    await saveSettings(deps.db, { debugMode: true })
+    const blocked = await (await app.request('/log', { headers: { cookie } })).text()
+    expect(blocked).not.toContain('>전송<')
+    const refused = await app.request('/replies/1/send', form(cookie, ''))
+    expect(await refused.text()).toContain('디버깅 모드라 유저에게 보낼 수 없다')
+    expect(saved).toHaveLength(0)
+
+    await saveSettings(deps.db, { debugMode: false })
     const sent = await app.request('/replies/1/send', form(cookie, ''))
     expect(await sent.text()).toContain('전송됨')
     expect(saved).toHaveLength(1)

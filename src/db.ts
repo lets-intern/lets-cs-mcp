@@ -32,6 +32,10 @@ const SCHEMA = [
     user_name TEXT,
     question_title TEXT,
     note TEXT,
+    question_content TEXT,
+    challenge_title TEXT,
+    template_title TEXT,
+    intended TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -45,8 +49,10 @@ export async function openDb(url: string, authToken?: string): Promise<Db> {
   const mod = remote ? await import('@libsql/client/web') : await import('@libsql/client')
   const db = mod.createClient({ url, authToken })
   await db.batch(SCHEMA, 'write')
-  // note 컬럼이 생기기 전에 만든 DB 를 위해 한 번만 덧붙인다.
-  const cols = await db.execute('PRAGMA table_info(replies)')
-  if (!cols.rows.some((r) => r.name === 'note')) await db.execute('ALTER TABLE replies ADD COLUMN note TEXT')
+  // 컬럼이 늘기 전에 만든 DB 를 위해 없는 컬럼만 덧붙인다.
+  const have = new Set((await db.execute('PRAGMA table_info(replies)')).rows.map((r) => String(r.name)))
+  for (const col of ['note', 'question_content', 'challenge_title', 'template_title', 'intended']) {
+    if (!have.has(col)) await db.execute(`ALTER TABLE replies ADD COLUMN ${col} TEXT`)
+  }
   return db
 }

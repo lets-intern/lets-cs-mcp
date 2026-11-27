@@ -3,7 +3,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { sign, verify } from 'hono/jwt'
 import { safeEqual } from './auth.js'
 import { todayKst } from './dates.js'
-import { discardDraft, renderTemplate, sendDraft, withFooter, type Deps } from './reply.js'
+import { discardDraft, sendDraft, type Deps } from './reply.js'
 import {
   countDrafts,
   countRepliesToday,
@@ -13,6 +13,7 @@ import {
   getSettings,
   getTemplate,
   listActiveTemplates,
+  listDebugRecords,
   listReplies,
   listTemplates,
   saveSettings,
@@ -20,7 +21,7 @@ import {
   updateTemplate,
   type TemplateFields,
 } from './store.js'
-import { DryRunBox, HomePage, LoginPage, LogPage, LogRow, ReadOnlyBox, SettingsBox, TemplateForm, TemplateItem, TemplatePreview, TemplatesPage } from './views.js'
+import { DebugBox, DebugPage, HomePage, LoginPage, LogPage, LogRow, ReadOnlyBox, SettingsBox, TemplateForm, TemplateItem, TemplatesPage } from './views.js'
 
 const COOKIE = 'cs_session'
 const WEEK = 7 * 24 * 60 * 60
@@ -102,7 +103,7 @@ export function dashboard(d: DashboardDeps) {
       activeTemplates: (await listActiveTemplates(deps.db, today)).length,
       drafts: await countDrafts(deps.db),
       sentToday: await countRepliesToday(deps.db, today, 'sent'),
-      simulatedToday: await countRepliesToday(deps.db, today, 'simulated'),
+      debugToday: await countRepliesToday(deps.db, today, 'simulated'),
       maxSendPerDay: settings.maxSendPerDay,
     }
     return c.html(
@@ -124,11 +125,11 @@ export function dashboard(d: DashboardDeps) {
     return c.html(<ReadOnlyBox readOnly={(await getSettings(db)).readOnly} />)
   })
 
-  app.post('/settings/dry-run', async (c) => {
+  app.post('/settings/debug', async (c) => {
     const { db } = await d.getDeps()
     const body = await c.req.parseBody()
-    await saveSettings(db, { dryRun: body.value === '1' })
-    return c.html(<DryRunBox dryRun={(await getSettings(db)).dryRun} />)
+    await saveSettings(db, { debugMode: body.value === '1' })
+    return c.html(<DebugBox debugMode={(await getSettings(db)).debugMode} />)
   })
 
   app.post('/settings', async (c) => {
@@ -162,16 +163,6 @@ export function dashboard(d: DashboardDeps) {
     return t ? c.html(<TemplateItem t={t} today={todayKst(now())} />) : c.body(null, 404)
   })
 
-  // 샘플 값으로 채워 실제 전송 문구가 어떻게 보일지 미리 본다. 아무것도 저장하지 않는다.
-  app.get('/templates/:id/preview', async (c) => {
-    const { db } = await d.getDeps()
-    const t = await getTemplate(db, Number(c.req.param('id')))
-    if (!t) return c.body(null, 404)
-    const { answerFooter } = await getSettings(db)
-    const sample = { userName: '홍길동', challengeTitle: '샘플 챌린지' }
-    return c.html(<TemplatePreview text={withFooter(renderTemplate(t.body, sample), answerFooter)} sample={sample} />)
-  })
-
   app.get('/templates/:id/edit', async (c) => {
     const { db } = await d.getDeps()
     const t = await getTemplate(db, Number(c.req.param('id')))
@@ -201,9 +192,19 @@ export function dashboard(d: DashboardDeps) {
     return c.body('')
   })
 
+  app.get('/debug', async (c) => {
+    const { db, now } = await d.getDeps()
+    const asked = Number(c.req.query('days'))
+    const days = [7, 14, 30].includes(asked) ? asked : 14
+    const since = todayKst(new Date(now().getTime() - (days - 1) * 24 * 60 * 60 * 1000))
+    const settings = await getSettings(db)
+    return c.html(<DebugPage records={await listDebugRecords(db, since)} days={days} debugMode={settings.debugMode} since={since} />)
+  })
+
   app.get('/log', async (c) => {
     const { db } = await d.getDeps()
-    return c.html(<LogPage replies={await listReplies(db)} />)
+    const settings = await getSettings(db)
+    return c.html(<LogPage replies={await listReplies(db)} canSend={!settings.readOnly && !settings.debugMode} />)
   })
 
   app.post('/replies/:id/send', async (c) => {
@@ -212,7 +213,8 @@ export function dashboard(d: DashboardDeps) {
     const result = await sendDraft(deps, id)
     const reply = await getReply(deps.db, id)
     if (!reply) return c.body('')
-    return c.html(<LogRow r={reply} note={result.ok ? undefined : result.reason} />)
+    const settings = await getSettings(deps.db)
+    return c.html(<LogRow r={reply} note={result.ok ? undefined : result.reason} canSend={!settings.readOnly && !settings.debugMode} />)
   })
 
   app.post('/replies/:id/discard', async (c) => {

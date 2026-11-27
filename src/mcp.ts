@@ -62,7 +62,9 @@ export async function createMcpServer(deps: Deps) {
     'list_active_templates',
     {
       description:
-        '오늘 유효한 답변 템플릿을 읽는다. 기간이 지났거나 꺼진 템플릿은 나오지 않는다. 응답의 readOnly 가 true 면 답변을 쓸 수 없다.',
+        '오늘 유효한 답변 템플릿(가이드)을 읽는다. 기간이 지났거나 꺼진 템플릿은 나오지 않는다. ' +
+        '템플릿 body 는 유저에게 그대로 보내는 문구가 아니라, 문의 내용에 맞춰 답변을 직접 쓸 때 참고하는 가이드다. ' +
+        '응답의 readOnly 가 true 면 답변을 쓸 수 없고, debugMode 가 true 면 답변이 유저에게 가지 않고 기록만 된다.',
       inputSchema: { challengeId: z.number().int().optional().describe('주면 그 챌린지용과 전체용만') },
     },
     async ({ challengeId }) => {
@@ -71,7 +73,7 @@ export async function createMcpServer(deps: Deps) {
       return asText({
         today,
         readOnly: settings.readOnly,
-        dryRun: settings.dryRun,
+        debugMode: settings.debugMode,
         autoSendEnabled: settings.autoSendEnabled,
         templates: templates.map((t) => ({
           id: t.id,
@@ -103,15 +105,16 @@ export async function createMcpServer(deps: Deps) {
       'reply_question',
       {
         description:
-          '문의에 답변한다. body 는 템플릿의 {{변수}} 를 모두 치환한 최종 문구여야 한다. ' +
+          '문의에 답변한다. body 는 문의 내용에 맞춰 직접 쓴 최종 답변이다. 템플릿 문구를 그대로 복사하지 말고 ' +
+          '가이드를 참고해 그 문의에 맞게 쓴다. 참고한 템플릿의 id 를 templateId 로 넣는다. ' +
           "mode 'send' 는 전역 자동 전송이 켜져 있고 템플릿이 autoSend 이고 유효할 때만 실제로 전송되고, 아니면 초안으로 저장된다. " +
-          '가상 전송 모드(dryRun)가 켜져 있으면 조건을 통과해도 실제로 보내지 않고 status 가 simulated 인 기록만 남는다. ' +
+          '디버깅 모드(debugMode)가 켜져 있으면 어떤 경우에도 유저에게 보내지 않고, 문의와 템플릿과 답변을 status 가 simulated 인 기록으로 남긴다. ' +
           '이미 답변이 달린 문의나 이미 전송한 문의는 거부된다.',
         inputSchema: {
           challengeId: z.number().int(),
           questionId: z.number().int(),
           body: z.string().min(1),
-          templateId: z.number().int().optional().describe('근거로 쓴 템플릿. send 에는 필요하다'),
+          templateId: z.number().int().optional().describe('참고한 템플릿. 디버깅 기록과 send 판단에 쓴다'),
           mode: z.enum(['draft', 'send']).default('draft'),
         },
       },
