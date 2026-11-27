@@ -2,10 +2,7 @@
   "mcpServers": {
     "lets-cs": {
       "type": "http",
-      "url": "https://lets-cs-mcp.vercel.app/mcp",
-      "headers": {
-        "Authorization": "Bearer ${LETS_CS_MCP_TOKEN}"
-      }
+      "url": "https://lets-cs-mcp.vercel.app/mcp"
     }
   }
 }
