@@ -30,6 +30,10 @@ describe('MCP 엔드포인트', () => {
       'get_question',
       'list_active_templates',
       'list_templates',
+      'list_policy_docs',
+      'get_policy_doc',
+      'search_policy_docs',
+      'list_policy_revisions',
       'get_overview',
       'get_debug_summary',
       'list_debug_records',
@@ -37,7 +41,8 @@ describe('MCP 엔드포인트', () => {
     ])
     await saveSettings(db, { readOnly: false })
     const all = await names()
-    for (const tool of ['reply_question', 'save_template', 'update_template', 'delete_template']) expect(all).toContain(tool)
+    for (const tool of ['reply_question', 'save_template', 'update_template', 'delete_template', 'save_policy_doc', 'update_policy_doc']) expect(all).toContain(tool)
+    expect(all).not.toContain('delete_policy_doc') // 정책 삭제는 사람만 한다
   })
 
   it('문의 목록의 page 는 서버가 1부터 세므로 기본값이 1이고 0 은 거부한다', async () => {
@@ -177,7 +182,7 @@ describe('대시보드', () => {
     }
 
     const home = await get('/')
-    for (const label of ['대시보드', '연결', '설정', '템플릿', '디버깅', '기록']) expect(home).toContain(`>${label}</a>`)
+    for (const label of ['대시보드', '연결', '설정', '템플릿', '정책', '디버깅', '기록']) expect(home).toContain(`>${label}</a>`)
     expect(home).not.toContain('class="side"') // 하위 메뉴가 하나뿐인 섹션은 왼쪽 메뉴를 그리지 않는다
     expect(home).not.toContain('data-copy="secret"') // 첫 페이지에 키를 두지 않는다
 
@@ -201,7 +206,8 @@ describe('대시보드', () => {
     const templates = await get('/templates')
     expect(templates).toContain('>새 템플릿</a>')
     expect(await get('/templates/new')).toContain('새 템플릿 (답변 가이드)')
-    for (const path of ['/debug', '/debug/records', '/log', '/log/drafts']) await get(path)
+    for (const path of ['/policies', '/policies/new', '/debug', '/debug/records', '/log', '/log/drafts']) await get(path)
+    expect(await get('/policies')).toContain('>새 정책</a>')
   })
 
   it('읽기 전용 버튼이 설정을 바꾼다', async () => {
@@ -307,5 +313,178 @@ describe('대시보드', () => {
     const sent = await app.request('/replies/1/send', form(cookie, ''))
     expect(await sent.text()).toContain('전송됨')
     expect(saved).toHaveLength(1)
+  })
+})
+
+describe('정책 문서', () => {
+  const policy = (over: Record<string, unknown> = {}) => ({
+    title: '페이백 정책',
+    summary: '페이백 지급 조건',
+    appliesWhen: '페이백, 환급을 묻는 문의',
+    tags: ['페이백', '환급'],
+    owner: '호정',
+    sourceUrl: 'https://notion.so/policy-1',
+    body: '페이백은 챌린지 종료 후 2주 뒤에 지급한다. 단 미션 80% 이상 제출한 경우에 한한다.',
+    ...over,
+  })
+
+  it('저장소: 만들고 고치면 이전 내용이 이력에 남고, 검색은 제목, 태그, 본문을 점수로 찾는다', async () => {
+    const { db } = await setup()
+    const { createPolicyDoc, updatePolicyDoc, listPolicyRevisions, searchPolicyDocs, getPolicyDoc, existingPolicyIds } = await import('./store.js')
+    const now = new Date('2026-11-27T01:00:00Z')
+    const a = await createPolicyDoc(db, { ...policy(), tags: ['페이백'] }, '사람', now)
+    const b = await createPolicyDoc(db, policy({ title: '환불 정책', summary: '환불 가능 범위', appliesWhen: '환불 문의', tags: ['환불'], body: '결제 후 7일 이내 부분 환불이 가능하다.' }), '사람', now)
+    expect(a).toMatchObject({ lastEditor: '사람', owner: '호정', tags: ['페이백'] })
+
+    const hits = await searchPolicyDocs(db, '페이백 지급')
+    expect(hits[0]).toMatchObject({ id: a.id, title: '페이백 정책' })
+    expect(hits[0]!.snippet).toContain('지급')
+    expect(hits.map((h) => h.id)).not.toContain(b.id)
+    expect(await searchPolicyDocs(db, '없는단어')).toEqual([])
+    expect((await searchPolicyDocs(db, '환불'))[0]?.id).toBe(b.id)
+
+    const updated = await updatePolicyDoc(db, a.id, { summary: '정리한 요약', body: '새 본문' }, 'AI', '요약 정리', now)
+    expect(updated).toMatchObject({ summary: '정리한 요약', body: '새 본문', lastEditor: 'AI', owner: '호정', sourceUrl: 'https://notion.so/policy-1' })
+    expect(updated!.contentHash).not.toBe(a.contentHash)
+    const revisions = await listPolicyRevisions(db, a.id)
+    expect(revisions).toHaveLength(1)
+    expect(revisions[0]).toMatchObject({ summary: '페이백 지급 조건', replacedBy: 'AI', editNote: '요약 정리' })
+    expect(revisions[0]!.body).toContain('2주 뒤')
+    expect((await getPolicyDoc(db, a.id))?.title).toBe('페이백 정책')
+    expect(await existingPolicyIds(db, [a.id, 999, a.id])).toEqual([a.id])
+  })
+
+  it('MCP: AI 가 읽고 검색하고 정리한다. 담당자와 원문은 못 바꾸고 삭제 도구는 없다', async () => {
+    const { app, db } = await setup()
+    const { saveSettings, createPolicyDoc } = await import('./store.js')
+    const call = async (name: string, args: unknown) => {
+      const r = (await (await app.fetch(rpc('tools/call', { name, arguments: args }, 'secret'))).json()).result
+      const text = r.content[0].text as string
+      return { isError: Boolean(r.isError), text, body: /^[[{]/.test(text) ? JSON.parse(text) : null }
+    }
+    const doc = await createPolicyDoc(db, policy(), '사람', new Date())
+
+    // 읽기 전용이어도 읽기는 된다
+    const list = await call('list_policy_docs', {})
+    expect(list.body[0]).toMatchObject({ id: doc.id, title: '페이백 정책', owner: '호정', bodyChars: expect.any(Number) })
+    expect(list.body[0].body).toBeUndefined() // 목차에는 본문이 없다
+    expect((await call('get_policy_doc', { id: doc.id })).body.body).toContain('2주 뒤')
+    expect((await call('search_policy_docs', { query: '환급' })).body[0].id).toBe(doc.id)
+    expect((await call('update_policy_doc', { id: doc.id, editNote: 'x', summary: 'y' })).text).toContain('not found') // 쓰기 도구는 숨겨져 있다
+
+    await saveSettings(db, { readOnly: false })
+    expect((await call('update_policy_doc', { id: doc.id, summary: '요약만' })).isError).toBe(true) // editNote 필수
+
+    const edited = await call('update_policy_doc', { id: doc.id, editNote: '요약을 한 줄로 정리', summary: '지급 조건 요약', tags: ['페이백', '지급'] })
+    expect(edited.isError).toBe(false)
+    expect(edited.body.policy).toMatchObject({ summary: '지급 조건 요약', tags: ['페이백', '지급'], lastEditor: 'AI', owner: '호정', sourceUrl: 'https://notion.so/policy-1' })
+
+    const revisions = await call('list_policy_revisions', { id: doc.id })
+    expect(revisions.body).toHaveLength(1)
+    expect(revisions.body[0]).toMatchObject({ replacedBy: 'AI', editNote: '요약을 한 줄로 정리', summary: '페이백 지급 조건' })
+
+    const created = await call('save_policy_doc', { title: '정리본', body: '내용', tags: ['a'] })
+    expect(created.body.policy).toMatchObject({ owner: 'AI 정리', sourceUrl: '', lastEditor: 'AI' })
+
+    const off = await call('update_policy_doc', { id: doc.id, editNote: '안 쓰는 문서', enabled: false })
+    expect(off.body.policy.enabled).toBe(false)
+    expect((await call('list_policy_docs', {})).body.map((p: { id: number }) => p.id)).not.toContain(doc.id)
+    expect((await call('list_policy_docs', { includeDisabled: true })).body.map((p: { id: number }) => p.id)).toContain(doc.id)
+    expect((await call('delete_policy_doc', { id: doc.id })).isError).toBe(true)
+  })
+
+  it('답변에 근거 정책을 남기고, 디버깅 요약이 쓰인 정책과 안 쓰인 정책을 보여준다', async () => {
+    const { app, db, deps } = await setup([question({ id: 1 }), question({ id: 2 })])
+    const { saveSettings, createPolicyDoc } = await import('./store.js')
+    const { submitReply } = await import('./reply.js')
+    const call = async (name: string, args: unknown) =>
+      JSON.parse((await (await app.fetch(rpc('tools/call', { name, arguments: args }, 'secret'))).json()).result.content[0].text)
+    await saveSettings(db, { readOnly: false })
+    const used = await createPolicyDoc(db, policy(), '사람', new Date())
+    const unused = await createPolicyDoc(db, policy({ title: '안 쓰는 정책' }), '사람', new Date())
+
+    await submitReply(deps, { challengeId: 10, questionId: 1, body: '답변', mode: 'draft', policyIds: [used.id, 999] })
+    await submitReply(deps, { challengeId: 10, questionId: 2, body: '답변', mode: 'draft' })
+
+    const records = await call('list_debug_records', {})
+    const byQ = Object.fromEntries(records.records.map((r: { questionId: number; policyIds: number[] }) => [r.questionId, r.policyIds]))
+    expect(byQ[1]).toEqual([used.id]) // 없는 번호 999 는 버려진다
+    expect(byQ[2]).toEqual([])
+
+    const summary = await call('get_debug_summary', {})
+    expect(summary.policies.used).toEqual([{ id: used.id, title: '페이백 정책', count: 1 }])
+    expect(summary.policies.unused).toEqual([{ id: unused.id, title: '안 쓰는 정책' }])
+    expect(summary.policies.recordsWithoutPolicy).toBe(1)
+    expect((await call('get_overview', {})).policyDocs).toBe(2)
+  })
+
+  it('MCP 로 템플릿에 근거 정책을 연결한다', async () => {
+    const { app, db } = await setup()
+    const { saveSettings, createPolicyDoc } = await import('./store.js')
+    const call = async (name: string, args: unknown) =>
+      JSON.parse((await (await app.fetch(rpc('tools/call', { name, arguments: args }, 'secret'))).json()).result.content[0].text)
+    await saveSettings(db, { readOnly: false })
+    const doc = await createPolicyDoc(db, policy(), '사람', new Date())
+    const t = await call('save_template', { title: '페이백', situation: 's', body: 'b', policyIds: [doc.id, 999] })
+    expect(t.template.policyIds).toEqual([doc.id])
+    const u = await call('update_template', { id: t.template.id, body: '고침' })
+    expect(u.template.policyIds).toEqual([doc.id]) // 안 주면 그대로
+    expect((await call('update_template', { id: t.template.id, policyIds: [] })).template.policyIds).toEqual([])
+  })
+
+  it('대시보드: 정책을 만들고 고치고 이력에서 되돌리고 끄고 지운다', async () => {
+    const { app, db } = await setup()
+    const { listPolicyDocs, listPolicyRevisions } = await import('./store.js')
+    const cookie = await login(app)
+
+    const created = await (await app.request('/policies', form(cookie, 'title=페이백 정책&body=원래 본문&owner=호정&tags=페이백, 환급&sourceUrl=https://notion.so/p1&summary=요약'))).text()
+    expect(created).toContain('페이백 정책')
+    expect(created).toContain('담당 호정')
+    expect(created).toContain('href="https://notion.so/p1"')
+    const [doc] = await listPolicyDocs(db, true)
+
+    // 위험한 주소는 링크가 되지 않는다. 제목과 본문이 없으면 거부한다
+    const risky = await (await app.request('/policies', form(cookie, 'title=위험&body=내용&sourceUrl=javascript:alert(1)'))).text()
+    expect(risky).not.toContain('href="javascript')
+    expect((await app.request('/policies', form(cookie, 'title=&body=x'))).status).toBe(400)
+
+    const edited = await (await app.request(`/policies/${doc!.id}`, form(cookie, 'title=페이백 정책&body=고친 본문&owner=호정', 'PUT'))).text()
+    expect(edited).toContain('마지막 수정 사람')
+    const revisions = await listPolicyRevisions(db, doc!.id)
+    expect(revisions).toHaveLength(1)
+
+    const history = await (await app.request(`/policies/${doc!.id}/history`, { headers: { cookie } })).text()
+    expect(history).toContain('대시보드에서 수정')
+    expect(history).toContain('이 내용으로 되돌리기')
+
+    const restored = await (await app.request(`/policies/${doc!.id}/restore/${revisions[0]!.id}`, form(cookie, ''))).text()
+    expect(restored).toContain('본문 보기')
+    expect((await listPolicyDocs(db, true))[0]?.body).toBe('원래 본문')
+    expect(await listPolicyRevisions(db, doc!.id)).toHaveLength(2) // 되돌리기도 이력에 남는다
+    expect((await app.request(`/policies/${doc!.id}/restore/9999`, form(cookie, ''))).status).toBe(404)
+
+    expect(await (await app.request(`/policies/${doc!.id}/toggle`, form(cookie, ''))).text()).toContain('꺼짐')
+    expect((await app.request(`/policies/${doc!.id}`, form(cookie, '', 'DELETE'))).status).toBe(200)
+    expect((await listPolicyDocs(db, true)).map((p) => p.id)).not.toContain(doc!.id)
+    expect(await listPolicyRevisions(db, doc!.id)).toHaveLength(0)
+  })
+
+  it('대시보드: 템플릿 폼의 근거 정책 번호는 존재하는 것만 저장되고 디버깅 화면에 근거 정책이 보인다', async () => {
+    const { app, db, deps } = await setup()
+    const { createPolicyDoc, saveSettings, listTemplates } = await import('./store.js')
+    const { submitReply } = await import('./reply.js')
+    const cookie = await login(app)
+    const doc = await createPolicyDoc(db, policy(), '사람', new Date())
+
+    const html = await (await app.request('/templates', form(cookie, `title=t&situation=s&body=b&policyIds=${doc.id}, 777`))).text()
+    expect(html).toContain(`정책 #${doc.id}`)
+    expect((await listTemplates(db))[0]?.policyIds).toEqual([doc.id])
+
+    await saveSettings(db, { readOnly: false })
+    await submitReply(deps, { challengeId: 10, questionId: 1, body: '답변', mode: 'draft', policyIds: [doc.id] })
+    const records = await (await app.request('/debug/records', { headers: { cookie } })).text()
+    expect(records).toContain(`근거 정책 #${doc.id} 페이백 정책`)
+    const summary = await (await app.request('/debug', { headers: { cookie } })).text()
+    expect(summary).toContain('정책 문서는 얼마나 쓰였나')
   })
 })

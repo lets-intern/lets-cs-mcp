@@ -7,19 +7,30 @@ import { discardDraft, sendDraft, type Deps } from './reply.js'
 import {
   countDrafts,
   countRepliesToday,
+  createPolicyDoc,
   createTemplate,
+  deletePolicyDoc,
   deleteTemplate,
+  existingPolicyIds,
   getReply,
   getDbCreatedAt,
+  getPolicyDoc,
+  getPolicyRevision,
   getSettings,
   getTemplate,
   listActiveTemplates,
   listDebugRecords,
+  listPolicyDocs,
+  listPolicyRevisions,
   listReplies,
   listTemplates,
+  policyUsage,
   saveSettings,
+  setPolicyEnabled,
   setTemplateEnabled,
+  updatePolicyDoc,
   updateTemplate,
+  type PolicyFields,
   type TemplateFields,
 } from './store.js'
 import {
@@ -32,6 +43,11 @@ import {
   LoginPage,
   LogPage,
   LogRow,
+  PoliciesNewPage,
+  PoliciesPage,
+  PolicyForm,
+  PolicyHistory,
+  PolicyItem,
   PromptPage,
   ReadOnlyBox,
   SettingsBox,
@@ -78,6 +94,24 @@ function parseTemplateForm(b: Record<string, unknown>): TemplateFields | null {
     validUntil,
     autoSend: b.autoSend === 'on',
     priority: intOrNull(b.priority) ?? 0,
+    policyIds: String(b.policyIds ?? '').split(',').map((v) => parseInt(v, 10)).filter((n) => Number.isInteger(n) && n > 0),
+  }
+}
+
+function parsePolicyForm(b: Record<string, unknown>): PolicyFields | null {
+  const title = String(b.title ?? '').trim()
+  const body = String(b.body ?? '').trim()
+  if (!title || !body) return null
+  const sourceUrl = String(b.sourceUrl ?? '').trim()
+  return {
+    title,
+    body,
+    summary: String(b.summary ?? '').trim(),
+    appliesWhen: String(b.appliesWhen ?? '').trim(),
+    tags: String(b.tags ?? '').split(',').map((t) => t.trim()).filter(Boolean),
+    owner: String(b.owner ?? '').trim(),
+    // javascript: 같은 주소가 링크로 나가지 않게 http(s) 만 받는다
+    sourceUrl: /^https?:\/\//.test(sourceUrl) ? sourceUrl : '',
   }
 }
 
@@ -184,6 +218,7 @@ export function dashboard(d: DashboardDeps) {
     const { db, now } = await d.getDeps()
     const fields = parseTemplateForm(await c.req.parseBody())
     if (!fields) return c.body(null, 400)
+    fields.policyIds = await existingPolicyIds(db, fields.policyIds ?? [])
     const t = await createTemplate(db, fields, now())
     return c.html(<TemplateItem t={t} today={todayKst(now())} />)
   })
@@ -206,6 +241,7 @@ export function dashboard(d: DashboardDeps) {
     const { db, now } = await d.getDeps()
     const fields = parseTemplateForm(await c.req.parseBody())
     if (!fields) return c.body(null, 400)
+    fields.policyIds = await existingPolicyIds(db, fields.policyIds ?? [])
     const t = await updateTemplate(db, Number(c.req.param('id')), fields, now())
     return t ? c.html(<TemplateItem t={t} today={todayKst(now())} />) : c.body(null, 404)
   })
@@ -225,6 +261,77 @@ export function dashboard(d: DashboardDeps) {
     return c.body('')
   })
 
+  app.get('/policies', async (c) => {
+    const { db } = await d.getDeps()
+    return c.html(<PoliciesPage policies={await listPolicyDocs(db, true)} />)
+  })
+
+  app.get('/policies/new', (c) => c.html(<PoliciesNewPage />))
+
+  app.post('/policies', async (c) => {
+    const { db, now } = await d.getDeps()
+    const fields = parsePolicyForm(await c.req.parseBody())
+    if (!fields) return c.body(null, 400)
+    return c.html(<PolicyItem p={await createPolicyDoc(db, fields, '사람', now())} />)
+  })
+
+  app.get('/policies/:id', async (c) => {
+    const { db } = await d.getDeps()
+    const p = await getPolicyDoc(db, Number(c.req.param('id')))
+    return p ? c.html(<PolicyItem p={p} />) : c.body(null, 404)
+  })
+
+  app.get('/policies/:id/edit', async (c) => {
+    const { db } = await d.getDeps()
+    const p = await getPolicyDoc(db, Number(c.req.param('id')))
+    return p ? c.html(<PolicyForm p={p} />) : c.body(null, 404)
+  })
+
+  app.put('/policies/:id', async (c) => {
+    const { db, now } = await d.getDeps()
+    const fields = parsePolicyForm(await c.req.parseBody())
+    if (!fields) return c.body(null, 400)
+    const p = await updatePolicyDoc(db, Number(c.req.param('id')), fields, '사람', '대시보드에서 수정', now())
+    return p ? c.html(<PolicyItem p={p} />) : c.body(null, 404)
+  })
+
+  app.post('/policies/:id/toggle', async (c) => {
+    const { db, now } = await d.getDeps()
+    const id = Number(c.req.param('id'))
+    const cur = await getPolicyDoc(db, id)
+    if (!cur) return c.body(null, 404)
+    return c.html(<PolicyItem p={(await setPolicyEnabled(db, id, !cur.enabled, '사람', now()))!} />)
+  })
+
+  app.delete('/policies/:id', async (c) => {
+    const { db } = await d.getDeps()
+    await deletePolicyDoc(db, Number(c.req.param('id')))
+    return c.body('')
+  })
+
+  app.get('/policies/:id/history', async (c) => {
+    const { db } = await d.getDeps()
+    const id = Number(c.req.param('id'))
+    const p = await getPolicyDoc(db, id)
+    return p ? c.html(<PolicyHistory p={p} revisions={await listPolicyRevisions(db, id)} />) : c.body(null, 404)
+  })
+
+  app.post('/policies/:id/restore/:revId', async (c) => {
+    const { db, now } = await d.getDeps()
+    const id = Number(c.req.param('id'))
+    const rev = await getPolicyRevision(db, Number(c.req.param('revId')))
+    if (!rev || rev.docId !== id) return c.body(null, 404)
+    const p = await updatePolicyDoc(
+      db,
+      id,
+      { title: rev.title, summary: rev.summary, appliesWhen: rev.appliesWhen, tags: rev.tags, body: rev.body },
+      '사람',
+      `이력 #${rev.id} 로 되돌림`,
+      now(),
+    )
+    return p ? c.html(<PolicyItem p={p} />) : c.body(null, 404)
+  })
+
   const debugWindow = async (c: Context) => {
     const { db, now } = await d.getDeps()
     const asked = Number(c.req.query('days'))
@@ -235,12 +342,14 @@ export function dashboard(d: DashboardDeps) {
 
   app.get('/debug', async (c) => {
     const { db, days, since, records } = await debugWindow(c)
-    return c.html(<DebugSummaryPage records={records} days={days} since={since} debugMode={(await getSettings(db)).debugMode} />)
+    const policies = policyUsage(records, await listPolicyDocs(db))
+    return c.html(<DebugSummaryPage records={records} days={days} since={since} debugMode={(await getSettings(db)).debugMode} policies={policies} />)
   })
 
   app.get('/debug/records', async (c) => {
-    const { days, since, records } = await debugWindow(c)
-    return c.html(<DebugRecordsPage records={records} days={days} since={since} />)
+    const { db, days, since, records } = await debugWindow(c)
+    const policyTitles = Object.fromEntries((await listPolicyDocs(db, true)).map((p) => [p.id, p.title]))
+    return c.html(<DebugRecordsPage records={records} days={days} since={since} policyTitles={policyTitles} />)
   })
 
   const logPage = (path: '/log' | '/log/drafts') => async (c: Context) => {

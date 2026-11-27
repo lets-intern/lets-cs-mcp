@@ -3,6 +3,7 @@ import { todayKst } from './dates.js'
 import type { LetsApi, Question } from './lets-api.js'
 import {
   countIntendedSendToday,
+  existingPolicyIds,
   countRepliesToday,
   findOpenReply,
   getReply,
@@ -39,6 +40,8 @@ export type SubmitInput = {
   questionId: number
   body: string
   templateId?: number
+  // 답변을 쓸 때 근거로 삼은 정책 문서 번호. 없는 번호는 버린다
+  policyIds?: number[]
   mode: 'draft' | 'send'
 }
 
@@ -85,6 +88,7 @@ export async function submitReply(deps: Deps, input: SubmitInput): Promise<Reply
   if (isAnswered(question)) return fail('이미 답변이 달린 문의다')
 
   const template = input.templateId ? await getTemplate(db, input.templateId) : null
+  const policyIds = await existingPolicyIds(db, input.policyIds ?? [])
   const { intended, reason } = await decide(deps, input, template, settings)
 
   const base = {
@@ -98,13 +102,14 @@ export async function submitReply(deps: Deps, input: SubmitInput): Promise<Reply
     challengeTitle: question.challengeTitle ?? null,
     templateTitle: template?.title ?? null,
     intended,
+    policyIds,
   }
   const upsert = async (status: 'draft' | 'simulated' | 'sent', text: string, note: string) =>
     open
       ? updateReply(
           db,
           open.id,
-          { status, body: text, templateId: input.templateId ?? null, templateTitle: template?.title ?? null, intended, note },
+          { status, body: text, templateId: input.templateId ?? null, templateTitle: template?.title ?? null, intended, note, policyIds },
           now(),
         )
       : insertReply(db, { ...base, status, body: text, note }, now())

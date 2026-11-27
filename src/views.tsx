@@ -1,5 +1,13 @@
 import type { FC, PropsWithChildren } from 'hono/jsx'
-import { templateStatus, type Reply, type Settings, type Template, type TemplateStatus } from './store.js'
+import {
+  templateStatus,
+  type PolicyDoc,
+  type PolicyRevision,
+  type Reply,
+  type Settings,
+  type Template,
+  type TemplateStatus,
+} from './store.js'
 
 // 검정과 흰색만 쓴다. 모서리는 각지게, 구분은 테두리로만 한다.
 const css = `
@@ -100,6 +108,15 @@ const SECTIONS: Section[] = [
     subs: [
       { href: '/templates', label: '목록' },
       { href: '/templates/new', label: '새 템플릿' },
+    ],
+  },
+  {
+    key: 'policies',
+    label: '정책',
+    href: '/policies',
+    subs: [
+      { href: '/policies', label: '목록' },
+      { href: '/policies/new', label: '새 정책' },
     ],
   },
   {
@@ -361,6 +378,7 @@ export const TemplateItem: FC<{ t: Template; today: string }> = ({ t, today }) =
         <span class="tag">{t.challengeId ? `챌린지 ${t.challengeId}` : '전체'}</span>
         {t.autoSend ? <span class="tag">자동 전송</span> : null}
         <span class="tag">우선순위 {t.priority}</span>
+        {t.policyIds.length > 0 ? <span class="tag">정책 {t.policyIds.map((i) => `#${i}`).join(', ')}</span> : null}
       </header>
       <div class="in">
         <p>상황: {t.situation}</p>
@@ -404,6 +422,8 @@ export const TemplateForm: FC<{ t?: Template }> = ({ t }) => {
           <div><label>종료일 (비우면 계속)</label><input name="validUntil" type="date" value={t?.validUntil ?? ''} /></div>
           <div><label>우선순위</label><input name="priority" type="number" value={t?.priority ?? 0} /></div>
         </div>
+        <label>근거 정책 문서 번호 (쉼표로 구분, 정책 메뉴의 # 번호)</label>
+        <input name="policyIds" value={t?.policyIds.join(', ') ?? ''} />
         <label class="inline"><input type="checkbox" name="autoSend" checked={t?.autoSend ?? false} />자동 전송 허용</label>
         <div class="actions">
           <button type="submit">{t ? '저장' : '추가'}</button>
@@ -462,7 +482,13 @@ const Bars: FC<{ rows: [string, number][] }> = ({ rows }) => {
   )
 }
 
-export const DebugSummaryPage: FC<{ records: Reply[]; days: number; debugMode: boolean; since: string }> = ({ records, days, debugMode, since }) => {
+export const DebugSummaryPage: FC<{
+  records: Reply[]
+  days: number
+  debugMode: boolean
+  since: string
+  policies: { used: { id: number; title: string; count: number }[]; unused: { id: number; title: string }[]; recordsWithoutPolicy: number }
+}> = ({ records, days, debugMode, since, policies }) => {
   const total = records.length
   const autoCount = records.filter((r) => r.intended === 'send').length
   const draftCount = total - autoCount
@@ -517,6 +543,20 @@ export const DebugSummaryPage: FC<{ records: Reply[]; days: number; debugMode: b
             </div>
           </section>
 
+          {policies.used.length + policies.unused.length > 0 ? (
+            <section class="box">
+              <h2>정책 문서는 얼마나 쓰였나</h2>
+              <div class="in">
+                <p class="lead">답변에 근거로 넣은 정책 번호를 센 것이다. 정책이 걸린 문의인데 근거 없이 쓴 답변이 많으면 정책을 안 읽고 답한 것이다.</p>
+                <Bars rows={policies.used.map((u) => [`#${u.id} ${u.title}`, u.count] as [string, number])} />
+                <p>근거 정책 없이 쓴 답변 {policies.recordsWithoutPolicy}건</p>
+                {policies.unused.length > 0 ? (
+                  <p class="hint">한 번도 근거로 쓰이지 않은 정책: {policies.unused.map((u) => `#${u.id} ${u.title}`).join(', ')}</p>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
           <section class="box">
             <h2>날짜별</h2>
             <div class="in">
@@ -530,7 +570,7 @@ export const DebugSummaryPage: FC<{ records: Reply[]; days: number; debugMode: b
   )
 }
 
-export const DebugRecordsPage: FC<{ records: Reply[]; days: number; since: string }> = ({ records, days, since }) => (
+export const DebugRecordsPage: FC<{ records: Reply[]; days: number; since: string; policyTitles: Record<number, string> }> = ({ records, days, since, policyTitles }) => (
   <Layout title="디버깅 기록" path="/debug/records">
     <section class="box">
       <h2>기록 목록</h2>
@@ -548,6 +588,7 @@ export const DebugRecordsPage: FC<{ records: Reply[]; days: number; since: strin
           {r.userName ? <span class="tag">{r.userName}</span> : null}
           <span class="tag">{r.templateTitle ? `템플릿: ${r.templateTitle}` : '템플릿 없음'}</span>
           <span class="tag">{r.intended === 'send' ? '운영이었다면 자동 전송' : '운영이었다면 초안'}</span>
+          <span class="tag">{r.policyIds.length > 0 ? `근거 정책 ${r.policyIds.map((i) => `#${i} ${policyTitles[i] ?? ''}`.trim()).join(', ')}` : '근거 정책 없음'}</span>
         </header>
         <div class="in">
           <p>문의: {r.questionTitle}</p>
@@ -558,6 +599,129 @@ export const DebugRecordsPage: FC<{ records: Reply[]; days: number; since: strin
         </div>
       </article>
     ))}
+  </Layout>
+)
+
+// ---------- 정책 ----------
+
+const safeHref = (url: string) => (/^https?:\/\//.test(url) ? url : null)
+
+export const PolicyItem: FC<{ p: PolicyDoc }> = ({ p }) => {
+  const href = safeHref(p.sourceUrl)
+  return (
+    <article class="box" id={`policy-${p.id}`}>
+      <header>
+        <strong>#{p.id} {p.title}</strong>
+        <span class="tag">{p.enabled ? '사용 중' : '꺼짐'}</span>
+        {p.owner ? <span class="tag">담당 {p.owner}</span> : null}
+        <span class="tag">마지막 수정 {p.lastEditor} {p.updatedAt}</span>
+        {p.tags.map((t) => <span class="tag">{t}</span>)}
+      </header>
+      <div class="in">
+        {p.summary ? <p>요약: {p.summary}</p> : null}
+        {p.appliesWhen ? <p>적용 상황: {p.appliesWhen}</p> : null}
+        {href ? <p>원문: <a href={href} target="_blank" rel="noopener noreferrer">{href}</a></p> : null}
+        <details>
+          <summary>본문 보기 ({p.body.length}자)</summary>
+          <pre>{p.body}</pre>
+        </details>
+        <div id={`policy-hist-${p.id}`} />
+        <div class="actions">
+          <button hx-get={`/policies/${p.id}/edit`} hx-target={`#policy-${p.id}`} hx-swap="outerHTML">수정</button>
+          <button hx-get={`/policies/${p.id}/history`} hx-target={`#policy-hist-${p.id}`} hx-swap="innerHTML">수정 이력</button>
+          <button hx-post={`/policies/${p.id}/toggle`} hx-target={`#policy-${p.id}`} hx-swap="outerHTML">
+            {p.enabled ? '끄기' : '켜기'}
+          </button>
+          <button hx-delete={`/policies/${p.id}`} hx-target={`#policy-${p.id}`} hx-swap="outerHTML" hx-confirm="정책 문서와 이력을 지운다. 되돌릴 수 없다. 계속할까?">
+            삭제
+          </button>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+export const PolicyHistory: FC<{ p: PolicyDoc; revisions: PolicyRevision[] }> = ({ p, revisions }) => (
+  <div class="muted">
+    {revisions.length === 0 ? (
+      <p>고친 이력이 없다.</p>
+    ) : (
+      revisions.map((r) => (
+        <details>
+          <summary>
+            {r.createdAt} {r.replacedBy} 가 고침: {r.editNote || '사유 없음'}
+          </summary>
+          <p>그 이전 내용: {r.title}</p>
+          {r.summary ? <p>요약: {r.summary}</p> : null}
+          <pre>{r.body}</pre>
+          <div class="actions">
+            <button
+              hx-post={`/policies/${p.id}/restore/${r.id}`}
+              hx-target={`#policy-${p.id}`}
+              hx-swap="outerHTML"
+              hx-confirm="이 이전 내용으로 되돌린다. 지금 내용은 이력에 남는다. 계속할까?"
+            >
+              이 내용으로 되돌리기
+            </button>
+          </div>
+        </details>
+      ))
+    )}
+  </div>
+)
+
+export const PolicyForm: FC<{ p?: PolicyDoc }> = ({ p }) => {
+  const attrs = p
+    ? { 'hx-put': `/policies/${p.id}`, 'hx-target': `#policy-${p.id}`, 'hx-swap': 'outerHTML' }
+    : { 'hx-post': '/policies', 'hx-target': '#policy-list', 'hx-swap': 'afterbegin', 'hx-on::after-request': 'if(event.detail.successful)this.reset()' }
+  return (
+    <form class="box" id={p ? `policy-${p.id}` : 'policy-new'} {...attrs}>
+      <h2>{p ? `정책 문서 수정 #${p.id}` : '새 정책 문서'}</h2>
+      <div class="in">
+        <label>제목</label>
+        <input name="title" required value={p?.title ?? ''} />
+        <label>한 줄 요약</label>
+        <input name="summary" value={p?.summary ?? ''} />
+        <label>어떤 문의에 적용되나 (AI 가 이 설명을 보고 문서를 고른다)</label>
+        <textarea name="appliesWhen" rows={2}>{p?.appliesWhen ?? ''}</textarea>
+        <div class="row" style="grid-template-columns:repeat(3,1fr)">
+          <div><label>태그 (쉼표로 구분)</label><input name="tags" value={p?.tags.join(', ') ?? ''} /></div>
+          <div><label>담당자</label><input name="owner" value={p?.owner ?? ''} /></div>
+          <div><label>원문 주소 (Notion)</label><input name="sourceUrl" value={p?.sourceUrl ?? ''} /></div>
+        </div>
+        <label>본문 (원문 그대로)</label>
+        <textarea name="body" rows={16} required>{p?.body ?? ''}</textarea>
+        <div class="actions">
+          <button type="submit">{p ? '저장' : '추가'}</button>
+          {p ? <button type="button" hx-get={`/policies/${p.id}`} hx-target={`#policy-${p.id}`} hx-swap="outerHTML">취소</button> : null}
+        </div>
+      </div>
+    </form>
+  )
+}
+
+export const PoliciesPage: FC<{ policies: PolicyDoc[] }> = ({ policies }) => (
+  <Layout title="정책 문서" path="/policies">
+    <section class="box">
+      <h2>운영정책 문서 {policies.length}건</h2>
+      <div class="in">
+        <p>호정님과 경지님이 정한 운영정책이다. AI 는 읽고, 요약과 태그, 본문 구조를 정리할 수 있다. 고칠 때마다 이전 내용이 이력에 남고 여기서 되돌릴 수 있다. 삭제는 여기서 사람만 한다.</p>
+      </div>
+    </section>
+    <div id="policy-list">
+      {policies.length === 0 ? (
+        <section class="box"><div class="in"><p>정책 문서가 없다. 새 정책 메뉴에서 넣는다.</p></div></section>
+      ) : (
+        policies.map((p) => <PolicyItem p={p} />)
+      )}
+    </div>
+  </Layout>
+)
+
+export const PoliciesNewPage: FC = () => (
+  <Layout title="새 정책 문서" path="/policies/new">
+    <PolicyForm />
+    <div id="policy-list" />
   </Layout>
 )
 

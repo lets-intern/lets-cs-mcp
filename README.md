@@ -6,6 +6,7 @@
 
 - MCP 도구: `list_pending_questions`(page 는 1부터), `get_question`, `list_active_templates`, `list_templates`, `get_overview`, `get_debug_summary`, `list_debug_records`, `list_replies`, `reply_question`, `save_template`, `update_template`, `delete_template`. 읽기 전용이면 쓰기 도구는 보이지 않는다. MCP 로 만든 템플릿은 자동 전송이 꺼져 있고, 켜는 것은 대시보드에서 사람만 한다
 - 대시보드: 답변 템플릿 관리(상황, 가이드, 유효기간), MCP 연결 정보와 키 복사, 읽기 전용 모드, 디버깅 모드와 경과 화면, 답변 기록
+- 운영정책 문서(호정님, 경지님이 정한 기준)를 DB 에 저장한다. AI 는 `list_policy_docs`(목차), `get_policy_doc`(전문), `search_policy_docs`(키워드)로 읽고 `update_policy_doc`, `save_policy_doc` 으로 정리할 수 있다. 정리할 때마다 이전 내용이 이력에 남고 사람이 대시보드에서 되돌린다. 삭제와 담당자, 원문 주소 변경은 사람만 한다. 임베딩 RAG 대신 목차와 전문 읽기, 키워드 검색을 쓴다. 정책 본문은 이 저장소에 두지 않고 DB 에만 둔다
 - 템플릿은 그대로 보내는 문구가 아니라 답변을 쓸 때 참고하는 가이드다. Claude 가 문의에 맞춰 직접 쓴다
 - 템플릿은 기간을 두거나 계속 유효하게 둘 수 있고, 기간이 지난 템플릿은 MCP 가 내려주지 않는다
 - 디버깅 모드가 켜져 있으면 MCP 와 대시보드 어디서도 유저에게 답변을 보내지 못한다. 대신 문의 내용, 참고한 템플릿, 쓴 답변, 운영이었다면 자동 전송이었을지 초안이었을지를 DB 에 남기고 디버깅 탭에서 기간별로 본다
