@@ -208,10 +208,11 @@ describe('대시보드', () => {
     expect(await get('/templates/new')).toContain('새 템플릿 (답변 가이드)')
     for (const path of ['/policies', '/policies/new', '/debug', '/debug/records', '/log', '/log/drafts']) await get(path)
 
-    // 워크플로우 메뉴는 로그아웃 오른쪽에 있다
+    // 워크플로우는 섹션들 오른쪽에 있고, 로그아웃이 맨 오른쪽 끝이다
     const nav = home.slice(home.indexOf('<nav>'), home.indexOf('</nav>'))
-    expect(nav.indexOf('로그아웃')).toBeGreaterThan(-1)
-    expect(nav.indexOf('워크플로우')).toBeGreaterThan(nav.indexOf('로그아웃'))
+    expect(nav.indexOf('기록')).toBeGreaterThan(-1)
+    expect(nav.indexOf('워크플로우')).toBeGreaterThan(nav.indexOf('기록'))
+    expect(nav.indexOf('로그아웃')).toBeGreaterThan(nav.indexOf('워크플로우'))
     const flow = await get('/workflow')
     expect(flow).toContain('매일 자정 자동 처리 흐름')
     expect(flow).toContain('00:00')

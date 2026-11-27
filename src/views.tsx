@@ -17,7 +17,7 @@ main{max-width:1100px;margin:0 auto;padding:16px}
 nav{display:flex;border:2px solid #000}
 nav a,nav button{padding:8px 16px;color:#000;text-decoration:none;border:0;border-right:2px solid #000;background:#fff;font:inherit;cursor:pointer}
 nav a.on,nav a:hover,nav button:hover{background:#000;color:#fff}
-nav form{margin:0 0 0 auto;display:flex}
+nav form{margin:0;display:flex}
 nav form button{border-right:0;border-left:2px solid #000}
 .shell{display:flex;gap:16px;align-items:flex-start;margin-top:16px}
 .side{width:200px;flex-shrink:0;border:2px solid #000}
@@ -42,7 +42,7 @@ nav form button{border-right:0;border-left:2px solid #000}
 .branch .head{background:#000;color:#fff;margin:-8px -8px 6px;padding:4px 8px}
 .stop{border:2px dashed #000;padding:6px 10px;margin-top:8px}
 .trigger{border:2px solid #000;background:#000;color:#fff;padding:8px 12px}
-nav a.wf{border-right:0;border-left:2px solid #000}
+nav a.wf{margin-left:auto;border-right:0;border-left:2px solid #000}
 .bar{display:flex;align-items:center;gap:8px;margin:6px 0}
 .bar .label{width:42%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bar .track{flex:1;border:1px solid #000;height:16px}
@@ -185,8 +185,8 @@ export const Layout: FC<PropsWithChildren<{ title: string; path?: string }>> = (
                 {SECTIONS.filter((sec) => sec.key !== 'workflow').map((sec) => (
                   <a href={sec.href} class={sec.key === section.key ? 'on' : ''}>{sec.label}</a>
                 ))}
-                <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
                 <a href="/workflow" class={`wf${section.key === 'workflow' ? ' on' : ''}`}>워크플로우</a>
+                <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
               </nav>
               <div class="shell">
                 {section.subs.length > 1 ? (
