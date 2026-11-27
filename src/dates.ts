@@ -13,3 +13,15 @@ export function todayKst(d: Date = new Date()): string {
 export function sinceKst(d: Date, days: number): string {
   return todayKst(new Date(d.getTime() - (days - 1) * 24 * 60 * 60 * 1000))
 }
+
+// 서버가 주는 'YYYY-MM-DDTHH:mm:ss(.SSS)' 를 'YYYY-MM-DD HH:mm:ss' 로 맞춘다. 서버 시각이 이미 한국 시간이라 그대로 쓴다.
+export function normalizeDateTime(v: unknown): string | null {
+  const m = String(v ?? '').match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/)
+  return m ? `${m[1]} ${m[2]}` : null
+}
+
+// 두 날짜('YYYY-MM-DD ...')의 날짜 차이. 문의가 들어온 날부터 기록한 날까지 며칠인지 센다.
+export function daysBetween(from: string, to: string): number {
+  const t = (d: string) => Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)))
+  return Math.round((t(to) - t(from)) / 86400000)
+}

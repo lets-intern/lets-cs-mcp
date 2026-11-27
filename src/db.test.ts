@@ -19,7 +19,7 @@ describe('DB 열기', () => {
 
     const db = await openDb(url)
     const cols = (await db.execute('PRAGMA table_info(replies)')).rows.map((r) => r.name)
-    for (const c of ['note', 'question_content', 'challenge_title', 'template_title', 'intended', 'policy_ids']) expect(cols).toContain(c)
+    for (const c of ['note', 'question_content', 'challenge_title', 'template_title', 'intended', 'policy_ids', 'question_created_at']) expect(cols).toContain(c)
     await expect(openDb(url)).resolves.toBeDefined()
   })
 })

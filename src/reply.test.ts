@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { discardDraft, sendDraft, submitReply } from './reply.js'
-import { createTemplate, getReply, getSettings, saveSettings, type TemplateFields } from './store.js'
+import { backfillQuestionDates, discardDraft, sendDraft, submitReply } from './reply.js'
+import { createTemplate, getReply, getSettings, insertReply, saveSettings, type TemplateFields } from './store.js'
 import { NOW, question, setup } from './test-helpers.js'
 
 const tpl = (over: Partial<TemplateFields> = {}): TemplateFields => ({
@@ -221,5 +221,27 @@ describe('운영 모드 (디버깅 모드 꺼짐)', () => {
     if (!draft.ok) throw new Error('draft failed')
     expect(await sendDraft(deps, draft.replyId)).toMatchObject({ ok: true, status: 'sent' })
     expect(saved).toEqual([{ challengeId: 10, questionId: 1, answer: '홍길동님, 부분 환불만 가능합니다\n\n드림' }])
+  })
+})
+
+describe('문의 접수일', () => {
+  it('기록에 문의가 들어온 시각을 저장하고, 기록한 시각과 구분한다', async () => {
+    const { deps } = await setup([question({ createDate: '2026-11-25T09:30:15.123456' })])
+    await saveSettings(deps.db, { readOnly: false })
+    const r = await submitReply(deps, { ...input, mode: 'draft' })
+    const row = await getReply(deps.db, (r as { replyId: number }).replyId)
+    expect(row?.questionCreatedAt).toBe('2026-11-25 09:30:15')
+    expect(row?.createdAt).toBe('2026-11-27 10:00:00') // 기록한 시각은 지금(KST)
+  })
+
+  it('접수일이 없는 옛 기록에 접수일을 채우고, 문의를 읽지 못한 기록은 비워 둔다', async () => {
+    const { deps } = await setup([question({ id: 1, createDate: '2026-11-20T08:00:00' })])
+    const base = { challengeId: 10, templateId: null, status: 'simulated' as const, body: 'b', error: null, userName: null, questionTitle: null, note: null,
+      questionContent: null, questionCreatedAt: null, challengeTitle: null, templateTitle: null, intended: 'draft' as const, policyIds: [] }
+    const ok = await insertReply(deps.db, { ...base, questionId: 1 }, NOW)
+    const gone = await insertReply(deps.db, { ...base, questionId: 404 }, NOW) // fake API 가 404 를 던진다
+    expect(await backfillQuestionDates(deps)).toEqual({ filled: 1, failed: 1 })
+    expect((await getReply(deps.db, ok.id))?.questionCreatedAt).toBe('2026-11-20 08:00:00')
+    expect((await getReply(deps.db, gone.id))?.questionCreatedAt).toBeNull()
   })
 })

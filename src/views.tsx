@@ -1,4 +1,5 @@
 import type { FC, PropsWithChildren } from 'hono/jsx'
+import { daysBetween } from './dates.js'
 import {
   templateStatus,
   type PolicyDoc,
@@ -603,13 +604,17 @@ export const DebugRecordsPage: FC<{ records: Reply[]; days: number; since: strin
       <div class="in">
         <DaysBar base="/debug/records" days={days} />
         <p>{since} 부터 {records.length}건. 단 답변은 유저에게 보내지 않았다.</p>
+        <BackfillButton show={records.some((r) => !r.questionCreatedAt)} />
       </div>
     </section>
     {records.map((r) => (
       <article class="box">
         <header>
           <strong>문의 #{r.questionId}</strong>
-          <span class="tag">{r.updatedAt}</span>
+          <span class="tag">문의 접수 {r.questionCreatedAt ?? '저장 전 기록'}</span>
+          <span class="tag">기록 {r.createdAt}</span>
+          {r.updatedAt !== r.createdAt ? <span class="tag">수정 {r.updatedAt}</span> : null}
+          {lagText(r) ? <span class="tag">{lagText(r)}</span> : null}
           <span class="tag">{r.challengeTitle ?? `챌린지 ${r.challengeId}`}</span>
           {r.userName ? <span class="tag">{r.userName}</span> : null}
           <span class="tag">{r.templateTitle ? `템플릿: ${r.templateTitle}` : '템플릿 없음'}</span>
@@ -932,6 +937,24 @@ export const WorkflowDocPage: FC<{ settings: Settings }> = ({ settings }) => (
   </Layout>
 )
 
+
+// 문의가 들어온 시각과 기록한 시각, 그 사이 일수를 한 줄로 보여준다.
+const lagText = (r: Reply) => {
+  if (!r.questionCreatedAt) return null
+  const d = daysBetween(r.questionCreatedAt, r.createdAt)
+  return d <= 0 ? '접수한 날 기록' : `접수 ${d}일 뒤 기록`
+}
+
+export const BackfillButton: FC<{ show: boolean }> = ({ show }) =>
+  show ? (
+    <div class="actions">
+      <button hx-post="/replies/backfill-dates" hx-target="#backfill-result" hx-swap="innerHTML">
+        문의 접수일 채우기
+      </button>
+      <span id="backfill-result">접수일이 저장되기 전에 만든 기록에 렛츠 API 에서 접수일을 가져와 채운다. 한 번에 40건까지.</span>
+    </div>
+  ) : null
+
 // ---------- 기록 ----------
 
 const REPLY_LABEL: Record<Reply['status'], string> = { draft: '초안', simulated: '디버깅 기록', sent: '전송됨', failed: '실패', discarded: '버림' }
@@ -942,12 +965,19 @@ export const LogRow: FC<{ r: Reply; note?: string; canSend?: boolean }> = ({ r, 
     <td>#{r.questionId}{r.userName ? ` ${r.userName}` : ''}</td>
     <td>{r.challengeId}</td>
     <td>
+      {r.questionCreatedAt ?? '저장 전 기록'}
+      {lagText(r) ? <p>{lagText(r)}</p> : null}
+    </td>
+    <td>
       <pre>{r.body}</pre>
       {r.error ? <p>오류: {r.error}</p> : null}
       {r.note ? <p>사유: {r.note}</p> : null}
       {note ? <p>{note}</p> : null}
     </td>
-    <td>{r.updatedAt}</td>
+    <td>
+      기록 {r.createdAt}
+      {r.updatedAt !== r.createdAt ? <p>수정 {r.updatedAt}</p> : null}
+    </td>
     <td>
       {r.status === 'draft' ? (
         <div class="actions">
@@ -966,12 +996,13 @@ export const LogPage: FC<{ replies: Reply[]; canSend: boolean; path: '/log' | '/
     <section class="box">
       <h2>{path === '/log' ? '전체 답변 기록' : '초안'}</h2>
       <div class="in">
+        <BackfillButton show={replies.some((r) => !r.questionCreatedAt)} />
         {replies.length === 0 ? (
           <p>기록이 없다</p>
         ) : (
           <table>
             <thead>
-              <tr><th>상태</th><th>문의</th><th>챌린지</th><th>본문</th><th>시각</th><th>작업</th></tr>
+              <tr><th>상태</th><th>문의</th><th>챌린지</th><th>문의 접수</th><th>본문</th><th>기록 시각</th><th>작업</th></tr>
             </thead>
             <tbody>{replies.map((r) => <LogRow r={r} canSend={canSend} />)}</tbody>
           </table>

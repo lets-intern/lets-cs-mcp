@@ -39,6 +39,7 @@ const SCHEMA = [
     template_title TEXT,
     intended TEXT,
     policy_ids TEXT,
+    question_created_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -81,7 +82,7 @@ export async function openDb(url: string, authToken?: string): Promise<Db> {
   const db = mod.createClient({ url, authToken })
   await db.batch(SCHEMA, 'write')
   // 컬럼이 늘기 전에 만든 DB 를 위해 없는 컬럼만 덧붙인다.
-  await ensureColumns(db, 'replies', ['note', 'question_content', 'challenge_title', 'template_title', 'intended', 'policy_ids'])
+  await ensureColumns(db, 'replies', ['note', 'question_content', 'challenge_title', 'template_title', 'intended', 'policy_ids', 'question_created_at'])
   await ensureColumns(db, 'templates', ['policy_ids'])
   // 이 DB 가 처음 열린 시각. 배포마다 DB 가 비워지는지 확인하려고 남긴다.
   await db.execute({ sql: "INSERT OR IGNORE INTO settings (key, value) VALUES ('db_created_at', ?)", args: [kstNow()] })

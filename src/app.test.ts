@@ -501,3 +501,54 @@ describe('정책 문서', () => {
     expect(summary).toContain('정책 문서는 얼마나 쓰였나')
   })
 })
+
+describe('기록의 문의 접수일', () => {
+  it('기록 화면과 디버깅 기록에 문의 접수일, 기록 시각, 며칠 뒤 기록했는지가 보인다', async () => {
+    const { app, deps } = await setup([question({ id: 1, createDate: '2026-11-26T09:00:00' }), question({ id: 2, createDate: '2026-11-27T08:00:00' })])
+    const { submitReply } = await import('./reply.js')
+    await saveSettings(deps.db, { readOnly: false })
+    await submitReply(deps, { challengeId: 10, questionId: 1, body: '답변1', mode: 'draft' })
+    await submitReply(deps, { challengeId: 10, questionId: 2, body: '답변2', mode: 'draft' })
+    const cookie = await login(app)
+
+    const records = await (await app.request('/debug/records', { headers: { cookie } })).text()
+    expect(records).toContain('문의 접수 2026-11-26 09:00:00')
+    expect(records).toContain('기록 2026-11-27 10:00:00')
+    expect(records).toContain('접수 1일 뒤 기록')
+    expect(records).toContain('접수한 날 기록')
+    expect(records).not.toContain('문의 접수일 채우기') // 접수일이 다 있으면 버튼이 없다
+
+    // 기록 화면(운영 모드에서 만든 초안)에도 같은 정보가 열로 보인다
+    await saveSettings(deps.db, { debugMode: false })
+    await submitReply(deps, { challengeId: 10, questionId: 1, body: '초안', mode: 'draft' })
+    const log = await (await app.request('/log', { headers: { cookie } })).text()
+    expect(log).toContain('<th>문의 접수</th>')
+    expect(log).toContain('<th>기록 시각</th>')
+    expect(log).toContain('2026-11-26 09:00:00')
+  })
+
+  it('접수일이 없는 기록은 표시하고 채우기 버튼으로 채운다. MCP 기록에도 두 시각이 있다', async () => {
+    const { app, db, deps } = await setup([question({ id: 7, createDate: '2026-11-24T10:00:00' })])
+    const { insertReply } = await import('./store.js')
+    await insertReply(
+      db,
+      { questionId: 7, challengeId: 10, templateId: null, status: 'simulated', body: '옛 기록', error: null, userName: '홍길동', questionTitle: '제목', note: null,
+        questionContent: '내용', questionCreatedAt: null, challengeTitle: '챌린지', templateTitle: null, intended: 'draft', policyIds: [] },
+      new Date('2026-11-27T01:00:00Z'),
+    )
+    const cookie = await login(app)
+    const before = await (await app.request('/debug/records', { headers: { cookie } })).text()
+    expect(before).toContain('문의 접수 저장 전 기록')
+    expect(before).toContain('문의 접수일 채우기')
+
+    const filled = await (await app.request('/replies/backfill-dates', form(cookie, ''))).text()
+    expect(filled).toContain('접수일을 1건 채웠다')
+    const after = await (await app.request('/debug/records', { headers: { cookie } })).text()
+    expect(after).toContain('문의 접수 2026-11-24 10:00:00')
+    expect(after).toContain('접수 3일 뒤 기록')
+
+    const rec = JSON.parse((await (await app.fetch(rpc('tools/call', { name: 'list_debug_records', arguments: {} }, 'secret'))).json()).result.content[0].text)
+    expect(rec.records[0]).toMatchObject({ questionCreatedAt: '2026-11-24 10:00:00', recordedAt: '2026-11-27 10:00:00' })
+    void deps
+  })
+})

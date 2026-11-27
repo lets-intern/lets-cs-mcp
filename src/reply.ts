@@ -1,5 +1,5 @@
 import type { Db } from './db.js'
-import { todayKst } from './dates.js'
+import { normalizeDateTime, todayKst } from './dates.js'
 import type { LetsApi, Question } from './lets-api.js'
 import {
   countIntendedSendToday,
@@ -10,6 +10,8 @@ import {
   getSettings,
   getTemplate,
   insertReply,
+  listRepliesMissingQuestionDate,
+  setQuestionCreatedAt,
   templateStatus,
   updateReply,
   type Template,
@@ -99,6 +101,7 @@ export async function submitReply(deps: Deps, input: SubmitInput): Promise<Reply
     userName: question.userName ?? null,
     questionTitle: question.title ?? null,
     questionContent: question.content ?? null,
+    questionCreatedAt: normalizeDateTime(question.createDate),
     challengeTitle: question.challengeTitle ?? null,
     templateTitle: template?.title ?? null,
     intended,
@@ -109,7 +112,7 @@ export async function submitReply(deps: Deps, input: SubmitInput): Promise<Reply
       ? updateReply(
           db,
           open.id,
-          { status, body: text, templateId: input.templateId ?? null, templateTitle: template?.title ?? null, intended, note, policyIds },
+          { status, body: text, templateId: input.templateId ?? null, templateTitle: template?.title ?? null, intended, note, policyIds, questionCreatedAt: base.questionCreatedAt },
           now(),
         )
       : insertReply(db, { ...base, status, body: text, note }, now())
@@ -171,4 +174,23 @@ export async function discardDraft(deps: Deps, replyId: number): Promise<boolean
   if (!reply || reply.status !== 'draft') return false
   await updateReply(deps.db, reply.id, { status: 'discarded' }, deps.now())
   return true
+}
+
+// 문의 접수일을 저장하기 전에 만든 기록에 접수일을 채운다. 한 번에 limit 건까지 렛츠 API 에서 문의를 읽어 온다.
+export async function backfillQuestionDates(deps: Deps, limit = 40): Promise<{ filled: number; failed: number }> {
+  let filled = 0
+  let failed = 0
+  for (const r of await listRepliesMissingQuestionDate(deps.db, limit)) {
+    try {
+      const q = await deps.api.getQuestion(r.challengeId, r.questionId)
+      const at = normalizeDateTime(q.createDate)
+      if (at) {
+        await setQuestionCreatedAt(deps.db, r.id, at)
+        filled++
+      } else failed++
+    } catch {
+      failed++
+    }
+  }
+  return { filled, failed }
 }

@@ -387,6 +387,8 @@ export type Reply = {
   note: string | null
   // 디버깅 기록을 나중에 읽으려고 그때의 문의와 템플릿을 같이 남긴다.
   questionContent: string | null
+  // 문의가 들어온 시각(서버의 문의 등록 시각). 기록한 시각과 다르다
+  questionCreatedAt: string | null
   challengeTitle: string | null
   templateTitle: string | null
   // 디버깅 모드가 아니었다면 어떻게 됐을지: 'send'(자동 전송) 또는 'draft'(초안)
@@ -409,6 +411,7 @@ const toReply = (r: Row): Reply => ({
   questionTitle: str(r.question_title),
   note: str(r.note),
   questionContent: str(r.question_content),
+  questionCreatedAt: str(r.question_created_at),
   challengeTitle: str(r.challenge_title),
   templateTitle: str(r.template_title),
   intended: str(r.intended) as Reply['intended'],
@@ -423,11 +426,11 @@ export async function insertReply(db: Db, r: NewReply, now: Date): Promise<Reply
   const at = kstNow(now)
   const res = await db.execute({
     sql: `INSERT INTO replies (question_id, challenge_id, template_id, status, body, error, user_name, question_title, note,
-                                 question_content, challenge_title, template_title, intended, policy_ids, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+                                 question_content, challenge_title, template_title, intended, policy_ids, question_created_at, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     args: [
       r.questionId, r.challengeId, r.templateId, r.status, r.body, r.error, r.userName, r.questionTitle, r.note,
-      r.questionContent, r.challengeTitle, r.templateTitle, r.intended, formatIds(r.policyIds), at, at,
+      r.questionContent, r.challengeTitle, r.templateTitle, r.intended, formatIds(r.policyIds), r.questionCreatedAt, at, at,
     ],
   })
   return toReply(res.rows[0]!)
@@ -445,18 +448,19 @@ export async function updateReply(
     templateTitle?: string | null
     intended?: 'send' | 'draft' | null
     policyIds?: number[]
+    questionCreatedAt?: string | null
   },
   now: Date,
 ): Promise<Reply> {
   const res = await db.execute({
     sql: `UPDATE replies SET status = ?, body = COALESCE(?, body), template_id = COALESCE(?, template_id), error = ?, note = ?,
               template_title = COALESCE(?, template_title), intended = COALESCE(?, intended),
-              policy_ids = COALESCE(?, policy_ids), updated_at = ?
+              policy_ids = COALESCE(?, policy_ids), question_created_at = COALESCE(?, question_created_at), updated_at = ?
           WHERE id = ? RETURNING *`,
     args: [
       patch.status, patch.body ?? null, patch.templateId ?? null, patch.error ?? null, patch.note ?? null,
       patch.templateTitle ?? null, patch.intended ?? null,
-      patch.policyIds === undefined ? null : formatIds(patch.policyIds), kstNow(now), id,
+      patch.policyIds === undefined ? null : formatIds(patch.policyIds), patch.questionCreatedAt ?? null, kstNow(now), id,
     ],
   })
   return toReply(res.rows[0]!)
@@ -481,6 +485,15 @@ export async function listReplies(db: Db, limit = 100, status?: ReplyStatus): Pr
     ? await db.execute({ sql: 'SELECT * FROM replies WHERE status = ? ORDER BY id DESC LIMIT ?', args: [status, limit] })
     : await db.execute({ sql: 'SELECT * FROM replies ORDER BY id DESC LIMIT ?', args: [limit] })
   return res.rows.map(toReply)
+}
+
+export async function listRepliesMissingQuestionDate(db: Db, limit: number): Promise<Reply[]> {
+  const res = await db.execute({ sql: 'SELECT * FROM replies WHERE question_created_at IS NULL ORDER BY id DESC LIMIT ?', args: [limit] })
+  return res.rows.map(toReply)
+}
+
+export async function setQuestionCreatedAt(db: Db, id: number, value: string): Promise<void> {
+  await db.execute({ sql: 'UPDATE replies SET question_created_at = ? WHERE id = ?', args: [value, id] })
 }
 
 export async function countRepliesToday(db: Db, today: string, status: ReplyStatus): Promise<number> {

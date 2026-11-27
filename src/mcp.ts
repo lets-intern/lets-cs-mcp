@@ -262,7 +262,7 @@ export async function createMcpServer(deps: Deps) {
     'list_debug_records',
     {
       description:
-        '디버깅 기록 목록을 최신순으로 읽는다. 각 기록에는 그때의 문의 내용, 참고한 템플릿, 쓴 답변, 운영이었다면 결과(intended)와 사유가 있다. 유저에게는 보내지 않은 기록이다. page 는 1부터 시작한다.',
+        '디버깅 기록 목록을 최신순으로 읽는다. 각 기록에는 문의가 들어온 시각(questionCreatedAt), 기록한 시각(recordedAt), 그때의 문의 내용, 참고한 템플릿, 쓴 답변, 운영이었다면 결과(intended)와 사유가 있다. 유저에게는 보내지 않은 기록이다. page 는 1부터 시작한다.',
       inputSchema: {
         days: z.number().int().min(1).max(60).default(14),
         templateId: z.number().int().optional().describe('이 템플릿을 참고한 기록만'),
@@ -281,7 +281,9 @@ export async function createMcpServer(deps: Deps) {
         size,
         records: all.slice(start, start + size).map((r) => ({
           id: r.id,
-          at: r.updatedAt,
+          questionCreatedAt: r.questionCreatedAt,
+          recordedAt: r.createdAt,
+          updatedAt: r.updatedAt,
           questionId: r.questionId,
           challengeId: r.challengeId,
           challengeTitle: r.challengeTitle,

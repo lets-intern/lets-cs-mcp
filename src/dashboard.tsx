@@ -3,7 +3,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { sign, verify } from 'hono/jwt'
 import { safeEqual } from './auth.js'
 import { sinceKst, todayKst } from './dates.js'
-import { discardDraft, sendDraft, type Deps } from './reply.js'
+import { backfillQuestionDates, discardDraft, sendDraft, type Deps } from './reply.js'
 import {
   countDrafts,
   countRepliesToday,
@@ -380,6 +380,16 @@ export function dashboard(d: DashboardDeps) {
   }
   app.get('/log', logPage('/log'))
   app.get('/log/drafts', logPage('/log/drafts'))
+
+  app.post('/replies/backfill-dates', async (c) => {
+    const deps = await d.getDeps()
+    const { filled, failed } = await backfillQuestionDates(deps)
+    return c.html(
+      <span>
+        접수일을 {filled}건 채웠다{failed > 0 ? `, ${failed}건은 문의를 읽지 못해 비워 뒀다` : ''}. 화면을 새로고침하면 보인다.
+      </span>,
+    )
+  })
 
   app.post('/replies/:id/send', async (c) => {
     const deps = await d.getDeps()
