@@ -2,7 +2,6 @@ node_modules
 .env
 .vercel
 dist
-api/index.js
 local.db*
 .env*
 !.env.example

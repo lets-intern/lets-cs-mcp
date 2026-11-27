@@ -7,7 +7,7 @@
     "dev": "tsx watch src/dev.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --jsx=automatic --jsx-import-source=hono/jsx --outfile=api/index.js"
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --jsx=automatic --jsx-import-source=hono/jsx --outfile=dist/app.js"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.11",

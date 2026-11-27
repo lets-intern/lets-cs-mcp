@@ -26,7 +26,7 @@ pnpm typecheck
 
 ## 배포
 
-Vercel 에 올린다. `src/index.ts` 가 진입점이다. DB 는 Turso 를 쓰고 `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` 을 환경 변수로 넣는다.
+Vercel 에 올린다. 진입점은 깃에 있는 `api/index.js` 이고, 빌드(`pnpm build`)가 만드는 `dist/app.js` 번들을 불러온다. 함수는 빌드 전 파일 목록으로 찾기 때문에 진입 파일은 깃에 있어야 한다. 푸시하면 자동 배포된다. DB 는 Turso 를 쓰고 `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` 을 환경 변수로 넣는다.
 
 ## 호출 방식
 
