@@ -248,12 +248,13 @@ const mask = (key: string) => key.slice(0, 4) + '*'.repeat(12)
 
 export const SCHEDULE_PROMPT = [
   'lets-cs MCP 로 챌린지 문의를 처리한다.',
-  '1. list_active_templates 로 오늘 유효한 템플릿(가이드)을 읽는다. readOnly 가 true 면 미답변 문의 수만 세어 보고하고 끝낸다.',
-  '2. list_pending_questions 로 미답변 문의를 읽는다.',
-  '3. 문의 하나씩 내용을 읽고 맞는 템플릿 가이드를 고른다. 가이드 문구를 그대로 복사하지 말고, 그 문의의 상황과 말투에 맞춰 직접 답변을 쓴다. 확인하지 못한 환불, 환급 가능 여부는 단정하지 않는다.',
-  '4. reply_question 을 부른다. 참고한 템플릿 id 를 templateId 에 넣고, 템플릿의 autoSend 가 true 면 mode 를 send, 아니면 draft 로 한다. debugMode 가 true 면 유저에게 가지 않고 기록만 되니 평소처럼 진행한다.',
-  '5. 맞는 템플릿이 없거나 애매하면 건드리지 않는다.',
-  '6. 마지막에 답변한 문의, 건너뛴 문의와 그 이유를 짧게 보고한다.',
+  '1. get_overview 로 모드와 현황을 본다. readOnly 가 true 면 미답변 문의 수만 세어 보고하고 끝낸다.',
+  '2. get_debug_summary 와 list_debug_records 로 지난 디버깅 결과를 점검한다. 같은 유형을 계속 초안으로 처리했거나, 답변이 가이드와 어긋났거나, 템플릿 없이 쓴 문의가 많으면 update_template 으로 고치거나 save_template 으로 새 가이드를 만든다.',
+  '3. list_active_templates 로 오늘 유효한 가이드를 읽고, list_pending_questions 로 미답변 문의를 읽는다(page 는 1부터).',
+  '4. 문의 하나씩 내용을 읽고 맞는 가이드를 고른다. 가이드 문구를 그대로 복사하지 말고, 그 문의의 상황과 말투에 맞춰 직접 답변을 쓴다. 확인하지 못한 환불, 환급 가능 여부는 단정하지 않는다.',
+  '5. reply_question 을 부른다. 참고한 템플릿 id 를 templateId 에 넣고, 템플릿의 autoSend 가 true 면 mode 를 send, 아니면 draft 로 한다. debugMode 가 true 면 유저에게 가지 않고 기록만 되니 평소처럼 진행한다.',
+  '6. 맞는 가이드가 없거나 애매한 문의는 건드리지 않는다. 모드와 자동 전송 허용은 바꿀 수 없다.',
+  '7. 마지막에 답변한 문의, 건너뛴 문의와 그 이유, 템플릿을 어떻게 고쳤는지를 짧게 보고한다.',
 ].join('\n')
 
 export const ConnectKeyBox: FC<{ origin: string; token: string }> = ({ origin, token }) => {

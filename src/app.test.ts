@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { saveSettings } from './store.js'
-import { setup } from './test-helpers.js'
+import { question, setup } from './test-helpers.js'
 
 const rpc = (method: string, params: unknown, token?: string) =>
   new Request('http://x/mcp', {
@@ -25,7 +25,16 @@ describe('MCP 엔드포인트', () => {
     const names = async () =>
       ((await (await app.fetch(rpc('tools/list', {}, 'secret'))).json()).result.tools as { name: string }[]).map((t) => t.name)
 
-    expect(await names()).toEqual(['list_pending_questions', 'get_question', 'list_active_templates', 'list_templates', 'list_replies'])
+    expect(await names()).toEqual([
+      'list_pending_questions',
+      'get_question',
+      'list_active_templates',
+      'list_templates',
+      'get_overview',
+      'get_debug_summary',
+      'list_debug_records',
+      'list_replies',
+    ])
     await saveSettings(db, { readOnly: false })
     const all = await names()
     for (const tool of ['reply_question', 'save_template', 'update_template', 'delete_template']) expect(all).toContain(tool)
@@ -84,6 +93,39 @@ describe('MCP 엔드포인트', () => {
 
     expect((await call('delete_template', { id })).isError).toBe(false)
     expect((await call('list_templates', {})).body).toHaveLength(0)
+  })
+
+  it('AI 가 현황, 디버깅 경과, 기록을 스스로 읽을 수 있다. 모드는 읽기만 된다', async () => {
+    const { app, db, deps } = await setup([question({ id: 1 }), question({ id: 2, userName: '김철수' })])
+    const { saveSettings, createTemplate } = await import('./store.js')
+    const { submitReply } = await import('./reply.js')
+    const call = async (name: string, args: unknown) =>
+      JSON.parse((await (await app.fetch(rpc('tools/call', { name, arguments: args }, 'secret'))).json()).result.content[0].text)
+
+    await saveSettings(db, { readOnly: false })
+    const t = await createTemplate(
+      db,
+      { title: '환불', situation: 's', body: '가이드', challengeId: null, validFrom: null, validUntil: null, autoSend: true, priority: 0 },
+      new Date('2026-11-27T01:00:00Z'),
+    )
+    await submitReply(deps, { challengeId: 10, questionId: 1, body: '첫 답변', templateId: t.id, mode: 'send' })
+    await submitReply(deps, { challengeId: 10, questionId: 2, body: '둘째 답변', mode: 'draft' })
+
+    const overview = await call('get_overview', {})
+    expect(overview).toMatchObject({ modes: { readOnly: false, debugMode: true, autoSendEnabled: false }, activeTemplates: 1, debugRecordsToday: 2 })
+
+    const summary = await call('get_debug_summary', { days: 7 })
+    expect(summary.total).toBe(2)
+    expect(summary.byIntended).toEqual({ wouldAutoSend: 1, wouldBeDraft: 1 })
+    expect(summary.byTemplate).toEqual(expect.arrayContaining([{ template: `#${t.id} 환불`, count: 1 }, { template: '템플릿 없이 작성', count: 1 }]))
+
+    const records = await call('list_debug_records', {})
+    expect(records.total).toBe(2)
+    expect(records.records[0]).toMatchObject({ questionContent: '환불하고 싶어요', answer: expect.any(String), intended: expect.any(String) })
+    const only = await call('list_debug_records', { templateId: t.id })
+    expect(only.total).toBe(1)
+    expect(only.records[0]).toMatchObject({ templateTitle: '환불', answer: '첫 답변', intended: 'send' })
+    expect(JSON.stringify(records)).not.toContain('secret@x.com')
   })
 
   it('문의를 읽을 때 이메일과 전화번호는 내보내지 않는다', async () => {

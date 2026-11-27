@@ -287,6 +287,26 @@ export async function listDebugRecords(db: Db, sinceDate: string, limit = 500): 
   return res.rows.map(toReply)
 }
 
+const tally = (items: string[]) => {
+  const m = new Map<string, number>()
+  for (const k of items) m.set(k, (m.get(k) ?? 0) + 1)
+  return [...m.entries()].sort((a, b) => b[1] - a[1])
+}
+
+// 디버깅 기록을 운영이었다면의 결과, 참고한 템플릿, 날짜별로 센다.
+export function summarizeDebug(records: Reply[]) {
+  return {
+    total: records.length,
+    byIntended: Object.fromEntries(tally(records.map((r) => (r.intended === 'send' ? 'wouldAutoSend' : 'wouldBeDraft')))),
+    byTemplate: tally(records.map((r) => (r.templateId ? `#${r.templateId} ${r.templateTitle ?? ''}`.trim() : '템플릿 없이 작성'))).map(
+      ([template, count]) => ({ template, count }),
+    ),
+    byDay: tally(records.map((r) => r.updatedAt.slice(0, 10)))
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([day, count]) => ({ day, count })),
+  }
+}
+
 export async function countDrafts(db: Db): Promise<number> {
   const res = await db.execute("SELECT COUNT(*) AS c FROM replies WHERE status = 'draft'")
   return Number(res.rows[0]?.c ?? 0)

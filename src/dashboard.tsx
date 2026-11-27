@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { sign, verify } from 'hono/jwt'
 import { safeEqual } from './auth.js'
-import { todayKst } from './dates.js'
+import { sinceKst, todayKst } from './dates.js'
 import { discardDraft, sendDraft, type Deps } from './reply.js'
 import {
   countDrafts,
@@ -229,7 +229,7 @@ export function dashboard(d: DashboardDeps) {
     const { db, now } = await d.getDeps()
     const asked = Number(c.req.query('days'))
     const days = [7, 14, 30].includes(asked) ? asked : 14
-    const since = todayKst(new Date(now().getTime() - (days - 1) * 24 * 60 * 60 * 1000))
+    const since = sinceKst(now(), days)
     return { db, days, since, records: await listDebugRecords(db, since) }
   }
 
