@@ -162,11 +162,21 @@ const toPolicy = (r: Row): PolicyDoc => ({
   updatedAt: String(r.updated_at),
 })
 
-export async function listPolicyDocs(db: Db, includeDisabled = false): Promise<PolicyDoc[]> {
-  const res = await db.execute(
-    includeDisabled ? 'SELECT * FROM policy_docs ORDER BY id' : 'SELECT * FROM policy_docs WHERE enabled = 1 ORDER BY id',
-  )
+// 최근에 만들거나 고친 문서가 위로 온다.
+export async function listPolicyDocs(db: Db, includeDisabled = false, page?: { limit: number; offset: number }): Promise<PolicyDoc[]> {
+  const where = includeDisabled ? '' : 'WHERE enabled = 1 '
+  const res = page
+    ? await db.execute({
+        sql: `SELECT * FROM policy_docs ${where}ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`,
+        args: [page.limit, page.offset],
+      })
+    : await db.execute(`SELECT * FROM policy_docs ${where}ORDER BY updated_at DESC, id DESC`)
   return res.rows.map(toPolicy)
+}
+
+export async function countPolicyDocs(db: Db, includeDisabled = false): Promise<number> {
+  const res = await db.execute(includeDisabled ? 'SELECT COUNT(*) AS c FROM policy_docs' : 'SELECT COUNT(*) AS c FROM policy_docs WHERE enabled = 1')
+  return Number(res.rows[0]?.c ?? 0)
 }
 
 export async function getPolicyDoc(db: Db, id: number): Promise<PolicyDoc | null> {
@@ -480,16 +490,32 @@ export async function findOpenReply(db: Db, questionId: number): Promise<Reply |
   return res.rows[0] ? toReply(res.rows[0]) : null
 }
 
-export async function listReplies(db: Db, limit = 100, status?: ReplyStatus): Promise<Reply[]> {
+// 최근에 만들거나 고친 기록이 위로 온다.
+export async function listReplies(db: Db, limit = 100, status?: ReplyStatus, offset = 0): Promise<Reply[]> {
   const res = status
-    ? await db.execute({ sql: 'SELECT * FROM replies WHERE status = ? ORDER BY id DESC LIMIT ?', args: [status, limit] })
-    : await db.execute({ sql: 'SELECT * FROM replies ORDER BY id DESC LIMIT ?', args: [limit] })
+    ? await db.execute({
+        sql: 'SELECT * FROM replies WHERE status = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?',
+        args: [status, limit, offset],
+      })
+    : await db.execute({ sql: 'SELECT * FROM replies ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?', args: [limit, offset] })
   return res.rows.map(toReply)
+}
+
+export async function countReplies(db: Db, status?: ReplyStatus): Promise<number> {
+  const res = status
+    ? await db.execute({ sql: 'SELECT COUNT(*) AS c FROM replies WHERE status = ?', args: [status] })
+    : await db.execute('SELECT COUNT(*) AS c FROM replies')
+  return Number(res.rows[0]?.c ?? 0)
 }
 
 export async function listRepliesMissingQuestionDate(db: Db, limit: number): Promise<Reply[]> {
   const res = await db.execute({ sql: 'SELECT * FROM replies WHERE question_created_at IS NULL ORDER BY id DESC LIMIT ?', args: [limit] })
   return res.rows.map(toReply)
+}
+
+export async function countMissingQuestionDate(db: Db): Promise<number> {
+  const res = await db.execute('SELECT COUNT(*) AS c FROM replies WHERE question_created_at IS NULL')
+  return Number(res.rows[0]?.c ?? 0)
 }
 
 export async function setQuestionCreatedAt(db: Db, id: number, value: string): Promise<void> {
@@ -513,12 +539,20 @@ export async function countIntendedSendToday(db: Db, today: string): Promise<num
   return Number(res.rows[0]?.c ?? 0)
 }
 
-export async function listDebugRecords(db: Db, sinceDate: string, limit = 500): Promise<Reply[]> {
+export async function listDebugRecords(db: Db, sinceDate: string, limit = 500, offset = 0): Promise<Reply[]> {
   const res = await db.execute({
-    sql: "SELECT * FROM replies WHERE status = 'simulated' AND substr(updated_at, 1, 10) >= ? ORDER BY updated_at DESC, id DESC LIMIT ?",
-    args: [sinceDate, limit],
+    sql: "SELECT * FROM replies WHERE status = 'simulated' AND substr(updated_at, 1, 10) >= ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
+    args: [sinceDate, limit, offset],
   })
   return res.rows.map(toReply)
+}
+
+export async function countDebugRecords(db: Db, sinceDate: string): Promise<number> {
+  const res = await db.execute({
+    sql: "SELECT COUNT(*) AS c FROM replies WHERE status = 'simulated' AND substr(updated_at, 1, 10) >= ?",
+    args: [sinceDate],
+  })
+  return Number(res.rows[0]?.c ?? 0)
 }
 
 // 디버깅 기록에서 정책이 얼마나 쓰였는지. 한 번도 안 쓰인 정책도 같이 돌려준다.

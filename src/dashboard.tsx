@@ -6,6 +6,10 @@ import { sinceKst, todayKst } from './dates.js'
 import { backfillQuestionDates, discardDraft, sendDraft, type Deps } from './reply.js'
 import {
   countDrafts,
+  countDebugRecords,
+  countMissingQuestionDate,
+  countPolicyDocs,
+  countReplies,
   countRepliesToday,
   createPolicyDoc,
   createTemplate,
@@ -37,17 +41,20 @@ import {
   ConnectConfigPage,
   ConnectPage,
   DebugBox,
+  DebugRecordCards,
   DebugRecordsPage,
   DebugSummaryPage,
   HomePage,
   LoginPage,
   LogPage,
   LogRow,
+  LogRows,
   PoliciesNewPage,
   PoliciesPage,
   PolicyForm,
   PolicyHistory,
   PolicyItem,
+  PolicyItems,
   PromptPage,
   ReadOnlyBox,
   SettingsBox,
@@ -72,6 +79,10 @@ export type DashboardDeps = {
   apiBase: string
   dbKind: string
 }
+
+// 목록은 최신순으로 PAGE 건씩 가져온다. 화면 아래에 닿으면 offset 을 올려 이어서 불러온다.
+const PAGE = 30
+const offsetOf = (c: Context) => Math.max(0, parseInt(c.req.query('offset') ?? '0', 10) || 0)
 
 const dateOrNull = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null)
 const intOrNull = (v: unknown) => {
@@ -213,7 +224,9 @@ export function dashboard(d: DashboardDeps) {
 
   app.get('/templates', async (c) => {
     const { db, now } = await d.getDeps()
-    return c.html(<TemplatesPage templates={await listTemplates(db)} today={todayKst(now())} />)
+    // 화면은 최근에 만들거나 고친 순이다. (MCP 는 우선순위 순서를 그대로 쓴다)
+    const templates = (await listTemplates(db)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id)
+    return c.html(<TemplatesPage templates={templates} today={todayKst(now())} />)
   })
 
   app.post('/templates', async (c) => {
@@ -265,7 +278,12 @@ export function dashboard(d: DashboardDeps) {
 
   app.get('/policies', async (c) => {
     const { db } = await d.getDeps()
-    return c.html(<PoliciesPage policies={await listPolicyDocs(db, true)} />)
+    const offset = offsetOf(c)
+    const total = await countPolicyDocs(db, true)
+    const policies = await listPolicyDocs(db, true, { limit: PAGE, offset })
+    const next = offset + PAGE < total ? `/policies?offset=${offset + PAGE}` : null
+    if (offset > 0) return c.html(<PolicyItems policies={policies} next={next} />)
+    return c.html(<PoliciesPage policies={policies} total={total} next={next} />)
   })
 
   app.get('/policies/new', (c) => c.html(<PoliciesNewPage />))
@@ -367,16 +385,49 @@ export function dashboard(d: DashboardDeps) {
   })
 
   app.get('/debug/records', async (c) => {
-    const { db, days, since, records } = await debugWindow(c)
+    const { db, now } = await d.getDeps()
+    const asked = Number(c.req.query('days'))
+    const days = [7, 14, 30].includes(asked) ? asked : 14
+    const since = sinceKst(now(), days)
+    const offset = offsetOf(c)
+    const total = await countDebugRecords(db, since)
+    const records = await listDebugRecords(db, since, PAGE, offset)
     const policyTitles = Object.fromEntries((await listPolicyDocs(db, true)).map((p) => [p.id, p.title]))
-    return c.html(<DebugRecordsPage records={records} days={days} since={since} policyTitles={policyTitles} />)
+    const next = offset + PAGE < total ? `/debug/records?days=${days}&offset=${offset + PAGE}` : null
+    if (offset > 0) return c.html(<DebugRecordCards records={records} policyTitles={policyTitles} next={next} />)
+    return c.html(
+      <DebugRecordsPage
+        records={records}
+        total={total}
+        next={next}
+        days={days}
+        since={since}
+        policyTitles={policyTitles}
+        anyMissingDate={(await countMissingQuestionDate(db)) > 0}
+      />,
+    )
   })
 
   const logPage = (path: '/log' | '/log/drafts') => async (c: Context) => {
     const { db } = await d.getDeps()
     const settings = await getSettings(db)
-    const replies = await listReplies(db, 100, path === '/log/drafts' ? 'draft' : undefined)
-    return c.html(<LogPage replies={replies} canSend={!settings.readOnly && !settings.debugMode} path={path} />)
+    const status = path === '/log/drafts' ? 'draft' : undefined
+    const offset = offsetOf(c)
+    const total = await countReplies(db, status)
+    const replies = await listReplies(db, PAGE, status, offset)
+    const canSend = !settings.readOnly && !settings.debugMode
+    const next = offset + PAGE < total ? `${path}?offset=${offset + PAGE}` : null
+    if (offset > 0) return c.html(<LogRows replies={replies} canSend={canSend} next={next} />)
+    return c.html(
+      <LogPage
+        replies={replies}
+        total={total}
+        next={next}
+        canSend={canSend}
+        path={path}
+        anyMissingDate={(await countMissingQuestionDate(db)) > 0}
+      />,
+    )
   }
   app.get('/log', logPage('/log'))
   app.get('/log/drafts', logPage('/log/drafts'))

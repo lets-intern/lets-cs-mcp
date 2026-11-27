@@ -597,40 +597,74 @@ export const DebugSummaryPage: FC<{
   )
 }
 
-export const DebugRecordsPage: FC<{ records: Reply[]; days: number; since: string; policyTitles: Record<number, string> }> = ({ records, days, since, policyTitles }) => (
+const DebugRecordCard: FC<{ r: Reply; policyTitles: Record<number, string> }> = ({ r, policyTitles }) => (
+  <article class="box">
+    <header>
+      <strong>문의 #{r.questionId}</strong>
+      <span class="tag">문의 접수 {r.questionCreatedAt ?? '저장 전 기록'}</span>
+      <span class="tag">기록 {r.createdAt}</span>
+      {r.updatedAt !== r.createdAt ? <span class="tag">수정 {r.updatedAt}</span> : null}
+      {lagText(r) ? <span class="tag">{lagText(r)}</span> : null}
+      <span class="tag">{r.challengeTitle ?? `챌린지 ${r.challengeId}`}</span>
+      {r.userName ? <span class="tag">{r.userName}</span> : null}
+      <span class="tag">{r.templateTitle ? `템플릿: ${r.templateTitle}` : '템플릿 없음'}</span>
+      <span class="tag">{r.intended === 'send' ? '운영이었다면 자동 전송' : '운영이었다면 초안'}</span>
+      <span class="tag">{r.policyIds.length > 0 ? `근거 정책 ${r.policyIds.map((i) => `#${i} ${policyTitles[i] ?? ''}`.trim()).join(', ')}` : '근거 정책 없음'}</span>
+    </header>
+    <div class="in">
+      <p>문의: {r.questionTitle}</p>
+      <pre>{r.questionContent ?? '(문의 내용이 기록되지 않았다)'}</pre>
+      <p>단 답변 (유저에게 보내지 않음)</p>
+      <pre>{r.body}</pre>
+      {r.note ? <p>사유: {r.note}</p> : null}
+    </div>
+  </article>
+)
+
+export const DebugRecordCards: FC<{ records: Reply[]; policyTitles: Record<number, string>; next: string | null }> = ({ records, policyTitles, next }) => (
+  <>
+    {records.map((r) => <DebugRecordCard r={r} policyTitles={policyTitles} />)}
+    {next ? <MoreBlock href={next} /> : null}
+  </>
+)
+
+export const DebugRecordsPage: FC<{
+  records: Reply[]
+  total: number
+  next: string | null
+  days: number
+  since: string
+  policyTitles: Record<number, string>
+  anyMissingDate: boolean
+}> = ({ records, total, next, days, since, policyTitles, anyMissingDate }) => (
   <Layout title="디버깅 기록" path="/debug/records">
     <section class="box">
       <h2>기록 목록</h2>
       <div class="in">
         <DaysBar base="/debug/records" days={days} />
-        <p>{since} 부터 {records.length}건. 단 답변은 유저에게 보내지 않았다.</p>
-        <BackfillButton show={records.some((r) => !r.questionCreatedAt)} />
+        <p>{since} 부터 {total}건. 단 답변은 유저에게 보내지 않았다.</p>
+        {total > 0 ? <OrderNote total={total} shown={Math.min(total, records.length)} /> : null}
+        <BackfillButton show={anyMissingDate} />
       </div>
     </section>
-    {records.map((r) => (
-      <article class="box">
-        <header>
-          <strong>문의 #{r.questionId}</strong>
-          <span class="tag">문의 접수 {r.questionCreatedAt ?? '저장 전 기록'}</span>
-          <span class="tag">기록 {r.createdAt}</span>
-          {r.updatedAt !== r.createdAt ? <span class="tag">수정 {r.updatedAt}</span> : null}
-          {lagText(r) ? <span class="tag">{lagText(r)}</span> : null}
-          <span class="tag">{r.challengeTitle ?? `챌린지 ${r.challengeId}`}</span>
-          {r.userName ? <span class="tag">{r.userName}</span> : null}
-          <span class="tag">{r.templateTitle ? `템플릿: ${r.templateTitle}` : '템플릿 없음'}</span>
-          <span class="tag">{r.intended === 'send' ? '운영이었다면 자동 전송' : '운영이었다면 초안'}</span>
-          <span class="tag">{r.policyIds.length > 0 ? `근거 정책 ${r.policyIds.map((i) => `#${i} ${policyTitles[i] ?? ''}`.trim()).join(', ')}` : '근거 정책 없음'}</span>
-        </header>
-        <div class="in">
-          <p>문의: {r.questionTitle}</p>
-          <pre>{r.questionContent ?? '(문의 내용이 기록되지 않았다)'}</pre>
-          <p>단 답변 (유저에게 보내지 않음)</p>
-          <pre>{r.body}</pre>
-          {r.note ? <p>사유: {r.note}</p> : null}
-        </div>
-      </article>
-    ))}
+    <DebugRecordCards records={records} policyTitles={policyTitles} next={next} />
   </Layout>
+)
+
+export const MoreRow: FC<{ href: string; cols: number }> = ({ href, cols }) => (
+  <tr hx-get={href} hx-trigger="revealed" hx-swap="outerHTML">
+    <td colspan={cols}>더 불러오는 중...</td>
+  </tr>
+)
+
+export const MoreBlock: FC<{ href: string }> = ({ href }) => (
+  <div class="box" hx-get={href} hx-trigger="revealed" hx-swap="outerHTML">
+    <div class="in">더 불러오는 중...</div>
+  </div>
+)
+
+const OrderNote: FC<{ total: number; shown: number }> = ({ total, shown }) => (
+  <p class="lead">최신순. 총 {total}건 중 {shown}건을 보고 있다. 아래로 내리면 이어서 불러온다.</p>
 )
 
 // ---------- 정책 ----------
@@ -731,19 +765,27 @@ export const PolicyForm: FC<{ p?: PolicyDoc }> = ({ p }) => {
   )
 }
 
-export const PoliciesPage: FC<{ policies: PolicyDoc[] }> = ({ policies }) => (
+export const PolicyItems: FC<{ policies: PolicyDoc[]; next: string | null }> = ({ policies, next }) => (
+  <>
+    {policies.map((p) => <PolicyItem p={p} />)}
+    {next ? <MoreBlock href={next} /> : null}
+  </>
+)
+
+export const PoliciesPage: FC<{ policies: PolicyDoc[]; total: number; next: string | null }> = ({ policies, total, next }) => (
   <Layout title="정책 문서" path="/policies">
     <section class="box">
-      <h2>운영정책 문서 {policies.length}건</h2>
+      <h2>운영정책 문서 {total}건</h2>
       <div class="in">
         <p>호정님과 경지님이 정한 운영정책이다. AI 는 읽고, 요약과 태그, 본문 구조를 정리할 수 있다. 고칠 때마다 이전 내용이 이력에 남고 여기서 되돌릴 수 있다. 삭제는 여기서 사람만 한다.</p>
+        {total > 0 ? <OrderNote total={total} shown={Math.min(total, policies.length)} /> : null}
       </div>
     </section>
     <div id="policy-list">
       {policies.length === 0 ? (
         <section class="box"><div class="in"><p>정책 문서가 없다. 새 정책 메뉴에서 넣는다.</p></div></section>
       ) : (
-        policies.map((p) => <PolicyItem p={p} />)
+        <PolicyItems policies={policies} next={next} />
       )}
     </div>
   </Layout>
@@ -991,21 +1033,40 @@ export const LogRow: FC<{ r: Reply; note?: string; canSend?: boolean }> = ({ r, 
   </tr>
 )
 
-export const LogPage: FC<{ replies: Reply[]; canSend: boolean; path: '/log' | '/log/drafts' }> = ({ replies, canSend, path }) => (
+export const LogRows: FC<{ replies: Reply[]; canSend: boolean; next: string | null }> = ({ replies, canSend, next }) => (
+  <>
+    {replies.map((r) => <LogRow r={r} canSend={canSend} />)}
+    {next ? <MoreRow href={next} cols={7} /> : null}
+  </>
+)
+
+export const LogPage: FC<{
+  replies: Reply[]
+  total: number
+  next: string | null
+  canSend: boolean
+  path: '/log' | '/log/drafts'
+  anyMissingDate: boolean
+}> = ({ replies, total, next, canSend, path, anyMissingDate }) => (
   <Layout title={path === '/log' ? '전체 기록' : '초안'} path={path}>
     <section class="box">
       <h2>{path === '/log' ? '전체 답변 기록' : '초안'}</h2>
       <div class="in">
-        <BackfillButton show={replies.some((r) => !r.questionCreatedAt)} />
-        {replies.length === 0 ? (
+        <BackfillButton show={anyMissingDate} />
+        {total === 0 ? (
           <p>기록이 없다</p>
         ) : (
-          <table>
-            <thead>
-              <tr><th>상태</th><th>문의</th><th>챌린지</th><th>문의 접수</th><th>본문</th><th>기록 시각</th><th>작업</th></tr>
-            </thead>
-            <tbody>{replies.map((r) => <LogRow r={r} canSend={canSend} />)}</tbody>
-          </table>
+          <>
+            <OrderNote total={total} shown={Math.min(total, replies.length)} />
+            <table>
+              <thead>
+                <tr><th>상태</th><th>문의</th><th>챌린지</th><th>문의 접수</th><th>본문</th><th>기록 시각</th><th>작업</th></tr>
+              </thead>
+              <tbody>
+                <LogRows replies={replies} canSend={canSend} next={next} />
+              </tbody>
+            </table>
+          </>
         )}
       </div>
     </section>

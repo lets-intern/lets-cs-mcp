@@ -447,7 +447,7 @@ describe('정책 문서', () => {
 
   it('대시보드: 정책을 만들고 고치고 이력에서 되돌리고 끄고 지운다', async () => {
     const { app, db } = await setup()
-    const { listPolicyDocs, listPolicyRevisions } = await import('./store.js')
+    const { listPolicyDocs, listPolicyRevisions, getPolicyDoc } = await import('./store.js')
     const cookie = await login(app)
 
     const created = await (await app.request('/policies', form(cookie, 'title=페이백 정책&body=원래 본문&owner=호정&tags=페이백, 환급&sourceUrl=https://notion.so/p1&summary=요약'))).text()
@@ -472,7 +472,7 @@ describe('정책 문서', () => {
 
     const restored = await (await app.request(`/policies/${doc!.id}/restore/${revisions[0]!.id}`, form(cookie, ''))).text()
     expect(restored).toContain('본문 보기')
-    expect((await listPolicyDocs(db, true))[0]?.body).toBe('원래 본문')
+    expect((await getPolicyDoc(db, doc!.id))?.body).toBe('원래 본문')
     expect(await listPolicyRevisions(db, doc!.id)).toHaveLength(2) // 되돌리기도 이력에 남는다
     expect((await app.request(`/policies/${doc!.id}/restore/9999`, form(cookie, ''))).status).toBe(404)
 
@@ -550,5 +550,76 @@ describe('기록의 문의 접수일', () => {
     const rec = JSON.parse((await (await app.fetch(rpc('tools/call', { name: 'list_debug_records', arguments: {} }, 'secret'))).json()).result.content[0].text)
     expect(rec.records[0]).toMatchObject({ questionCreatedAt: '2026-11-24 10:00:00', recordedAt: '2026-11-27 10:00:00' })
     void deps
+  })
+})
+
+describe('목록은 최신순이고 스크롤하면 이어서 불러온다', () => {
+  const minute = (i: number) => new Date(Date.UTC(2026, 10, 27, 0, i)) // KST 2026-11-27 09:00 + i 분
+  const num = (i: number) => String(i).padStart(2, '0')
+
+  it('기록: 최근에 만들거나 고친 것이 위에 오고, 30건씩 끊어 다음 조각을 불러온다', async () => {
+    const { app, db } = await setup()
+    const { insertReply, updateReply } = await import('./store.js')
+    const base = { challengeId: 10, templateId: null, status: 'draft' as const, error: null, userName: null, questionTitle: null, note: null,
+      questionContent: null, questionCreatedAt: null, challengeTitle: null, templateTitle: null, intended: 'draft' as const, policyIds: [] as number[] }
+    const ids: number[] = []
+    for (let i = 1; i <= 35; i++) ids.push((await insertReply(db, { ...base, questionId: i, body: `R-${num(i)}` }, minute(i))).id)
+    await updateReply(db, ids[0]!, { status: 'draft', body: 'R-01' }, minute(60)) // 가장 오래된 기록을 가장 나중에 고침
+    const cookie = await login(app)
+
+    const first = await (await app.request('/log', { headers: { cookie } })).text()
+    expect(first).toContain('최신순. 총 35건 중 30건')
+    const at = (t: string) => first.indexOf(`>${t}<`)
+    expect(at('R-01')).toBeGreaterThan(-1) // 방금 고친 것이 맨 위
+    expect(at('R-01')).toBeLessThan(at('R-35'))
+    expect(at('R-35')).toBeLessThan(at('R-34'))
+    expect(at('R-34')).toBeLessThan(at('R-07'))
+    expect(first).not.toContain('>R-06<') // 30건 밖
+    expect(first).toContain('hx-get="/log?offset=30"')
+    expect(first).toContain('hx-trigger="revealed"')
+
+    const more = await (await app.request('/log?offset=30', { headers: { cookie } })).text()
+    expect(more).not.toContain('<html')
+    for (const t of ['R-06', 'R-05', 'R-02']) expect(more).toContain(`>${t}<`)
+    expect(more.indexOf('>R-06<')).toBeLessThan(more.indexOf('>R-02<'))
+    expect(more).not.toContain('hx-trigger="revealed"') // 마지막 조각이라 더 없다
+  })
+
+  it('정책 문서와 디버깅 기록과 템플릿도 최신순이다', async () => {
+    const { app, db } = await setup()
+    const { createPolicyDoc, createTemplate, insertReply, updatePolicyDoc } = await import('./store.js')
+    const fields = (n: number) => ({ title: `정책-${num(n)}`, summary: '', appliesWhen: '', tags: [], owner: '', sourceUrl: '', body: `본문${n}` })
+    const policyIds: number[] = []
+    for (let i = 1; i <= 35; i++) policyIds.push((await createPolicyDoc(db, fields(i), '사람', minute(i))).id)
+    await updatePolicyDoc(db, policyIds[0]!, { summary: '고침' }, '사람', 'x', minute(60)) // 가장 오래된 문서를 가장 나중에 고침
+
+    const base = { challengeId: 10, templateId: null, status: 'simulated' as const, error: null, userName: null, questionTitle: null, note: null,
+      questionContent: null, questionCreatedAt: null, challengeTitle: null, templateTitle: null, intended: 'draft' as const, policyIds: [] as number[] }
+    for (let i = 1; i <= 35; i++) await insertReply(db, { ...base, questionId: i, body: `D-${num(i)}` }, minute(i))
+
+    const tf = { situation: 's', body: 'b', challengeId: null, validFrom: null, validUntil: null, autoSend: false, priority: 0 }
+    await createTemplate(db, { ...tf, title: '오래된 템플릿', priority: 99 }, minute(1))
+    await createTemplate(db, { ...tf, title: '새 템플릿' }, minute(2))
+
+    const cookie = await login(app)
+    const get = async (path: string) => (await app.request(path, { headers: { cookie } })).text()
+
+    const policies = await get('/policies')
+    expect(policies.indexOf('정책-01')).toBeLessThan(policies.indexOf('정책-35')) // 방금 고친 것이 맨 위
+    expect(policies.indexOf('정책-35')).toBeLessThan(policies.indexOf('정책-34'))
+    expect(policies).not.toContain('정책-05')
+    expect(policies).toContain('hx-get="/policies?offset=30"')
+    const policiesMore = await get('/policies?offset=30')
+    expect(policiesMore).toContain('정책-05')
+    expect(policiesMore).not.toContain('hx-trigger="revealed"')
+
+    const records = await get('/debug/records')
+    expect(records.indexOf('D-35')).toBeLessThan(records.indexOf('D-34'))
+    expect(records).not.toContain('D-05')
+    expect(records).toContain('hx-get="/debug/records?days=14&amp;offset=30"')
+    expect(await get('/debug/records?days=14&offset=30')).toContain('D-05')
+
+    const templates = await get('/templates')
+    expect(templates.indexOf('새 템플릿')).toBeLessThan(templates.indexOf('오래된 템플릿')) // 우선순위가 높아도 화면은 최신순
   })
 })
