@@ -4,7 +4,7 @@
 
 ## 하는 일
 
-- MCP 도구: `list_pending_questions`, `get_question`, `list_active_templates`, `list_replies`, `reply_question`
+- MCP 도구: `list_pending_questions`(page 는 1부터), `get_question`, `list_active_templates`, `list_templates`, `list_replies`, `reply_question`, `save_template`, `update_template`, `delete_template`. 읽기 전용이면 쓰기 도구는 보이지 않는다. MCP 로 만든 템플릿은 자동 전송이 꺼져 있고, 켜는 것은 대시보드에서 사람만 한다
 - 대시보드: 답변 템플릿 관리(상황, 가이드, 유효기간), MCP 연결 정보와 키 복사, 읽기 전용 모드, 디버깅 모드와 경과 화면, 답변 기록
 - 템플릿은 그대로 보내는 문구가 아니라 답변을 쓸 때 참고하는 가이드다. Claude 가 문의에 맞춰 직접 쓴다
 - 템플릿은 기간을 두거나 계속 유효하게 둘 수 있고, 기간이 지난 템플릿은 MCP 가 내려주지 않는다

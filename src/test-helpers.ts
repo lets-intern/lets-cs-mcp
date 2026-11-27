@@ -25,8 +25,10 @@ export function question(over: Partial<Question> = {}): Question {
 export function fakeApi(initial: Question[]) {
   const questions = new Map(initial.map((q) => [q.id, q]))
   const saved: { challengeId: number; questionId: number; answer: string }[] = []
+  const listCalls: { page?: number; size?: number; answerStatus?: string }[] = []
   const api = {
-    async listQuestions(p: { answerStatus?: string }) {
+    async listQuestions(p: { answerStatus?: string; page?: number; size?: number }) {
+      listCalls.push(p)
       const list = [...questions.values()].filter((q) => !p.answerStatus || q.answerStatus === p.answerStatus)
       return { questionList: list, pageInfo: { totalElements: list.length } }
     },
@@ -40,7 +42,7 @@ export function fakeApi(initial: Question[]) {
       return null
     },
   } as unknown as LetsApi
-  return { api, saved, questions }
+  return { api, saved, questions, listCalls }
 }
 
 export async function setup(initial: Question[] = [question()]) {

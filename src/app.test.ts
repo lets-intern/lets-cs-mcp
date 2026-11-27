@@ -25,9 +25,65 @@ describe('MCP 엔드포인트', () => {
     const names = async () =>
       ((await (await app.fetch(rpc('tools/list', {}, 'secret'))).json()).result.tools as { name: string }[]).map((t) => t.name)
 
-    expect(await names()).toEqual(['list_pending_questions', 'get_question', 'list_active_templates', 'list_replies'])
+    expect(await names()).toEqual(['list_pending_questions', 'get_question', 'list_active_templates', 'list_templates', 'list_replies'])
     await saveSettings(db, { readOnly: false })
-    expect(await names()).toContain('reply_question')
+    const all = await names()
+    for (const tool of ['reply_question', 'save_template', 'update_template', 'delete_template']) expect(all).toContain(tool)
+  })
+
+  it('문의 목록의 page 는 서버가 1부터 세므로 기본값이 1이고 0 은 거부한다', async () => {
+    const { app, listCalls } = await setup()
+    const call = async (args: unknown) =>
+      (await (await app.fetch(rpc('tools/call', { name: 'list_pending_questions', arguments: args }, 'secret'))).json()).result
+    await call({})
+    expect(listCalls[0]?.page).toBe(1)
+    await call({ page: 2 })
+    expect(listCalls[1]?.page).toBe(2)
+    const zero = await call({ page: 0 })
+    expect(zero.isError).toBe(true)
+    expect(listCalls).toHaveLength(2)
+  })
+
+  it('MCP 로 템플릿을 만들고 고치고 지운다. 자동 전송은 켤 수 없다', async () => {
+    const { app, db } = await setup()
+    const { saveSettings, getTemplate } = await import('./store.js')
+    const call = async (name: string, args: unknown) => {
+      const r = (await (await app.fetch(rpc('tools/call', { name, arguments: args }, 'secret'))).json()).result
+      const text = r.content[0].text as string
+      // 입력 검사나 없는 도구는 JSON 이 아닌 'MCP error ...' 문장으로 돌아온다
+      return { isError: Boolean(r.isError), text, body: /^[[{]/.test(text) ? JSON.parse(text) : null }
+    }
+
+    // 읽기 전용일 때는 쓰기 도구가 없어서 호출이 실패한다
+    const blocked = await call('save_template', { title: 'a', situation: 'b', body: 'c' })
+    expect(blocked.isError).toBe(true)
+    expect(blocked.text).toContain('not found')
+
+    await saveSettings(db, { readOnly: false })
+    const created = await call('save_template', {
+      title: '환불', situation: '환불 문의', body: '가이드', validUntil: '2026-12-31', autoSend: true,
+    })
+    expect(created.isError).toBe(false)
+    const id = created.body.template.id
+    expect(created.body.template).toMatchObject({ title: '환불', autoSend: false, status: 'active', validUntil: '2026-12-31' })
+    expect((await getTemplate(db, id))?.autoSend).toBe(false)
+
+    const updated = await call('update_template', { id, body: '고친 가이드', validUntil: null, challengeId: 10 })
+    expect(updated.body.template).toMatchObject({ body: '고친 가이드', validUntil: null, challengeId: 10, autoSend: false })
+
+    expect((await call('update_template', { id, validFrom: '2026-12-05', validUntil: '2026-12-01' })).isError).toBe(true)
+    expect((await call('update_template', { id: 9999, title: 'x' })).isError).toBe(true)
+    expect((await call('save_template', { title: 'a', situation: 'b', body: 'c', validFrom: '12/05' })).isError).toBe(true)
+
+    const off = await call('update_template', { id, enabled: false })
+    expect(off.body.template.status).toBe('disabled')
+    const all = await call('list_templates', {})
+    expect(all.body).toHaveLength(1)
+    const active = await call('list_active_templates', {})
+    expect(active.body.templates).toHaveLength(0)
+
+    expect((await call('delete_template', { id })).isError).toBe(false)
+    expect((await call('list_templates', {})).body).toHaveLength(0)
   })
 
   it('문의를 읽을 때 이메일과 전화번호는 내보내지 않는다', async () => {

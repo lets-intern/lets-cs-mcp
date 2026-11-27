@@ -3,7 +3,19 @@ import { z } from 'zod'
 import { todayKst } from './dates.js'
 import type { Question } from './lets-api.js'
 import { submitReply, type Deps } from './reply.js'
-import { getSettings, listActiveTemplates, listReplies } from './store.js'
+import {
+  createTemplate,
+  deleteTemplate,
+  getSettings,
+  getTemplate,
+  listActiveTemplates,
+  listReplies,
+  listTemplates,
+  setTemplateEnabled,
+  templateStatus,
+  updateTemplate,
+  type Template,
+} from './store.js'
 
 const asText = (value: unknown, isError = false) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }],
@@ -27,6 +39,21 @@ export function pickQuestion(q: Question) {
   }
 }
 
+function describeTemplate(t: Template, today: string) {
+  return {
+    id: t.id,
+    title: t.title,
+    situation: t.situation,
+    body: t.body,
+    challengeId: t.challengeId,
+    validFrom: t.validFrom,
+    validUntil: t.validUntil,
+    status: templateStatus(t, today),
+    autoSend: t.autoSend,
+    priority: t.priority,
+  }
+}
+
 export async function createMcpServer(deps: Deps) {
   const { db, api, now } = deps
   const settings = await getSettings(db)
@@ -39,7 +66,7 @@ export async function createMcpServer(deps: Deps) {
       inputSchema: {
         challengeId: z.number().int().optional().describe('비우면 모든 챌린지'),
         answerStatus: z.enum(['WAITING', 'COMPLETED']).default('WAITING'),
-        page: z.number().int().min(0).default(0),
+        page: z.number().int().min(1).default(1).describe('1부터 시작한다. 서버가 1-based 라서 0 과 1 은 같은 첫 페이지다'),
         size: z.number().int().min(1).max(50).default(20),
       },
     },
@@ -91,6 +118,19 @@ export async function createMcpServer(deps: Deps) {
   )
 
   server.registerTool(
+    'list_templates',
+    {
+      description:
+        '등록된 모든 템플릿을 읽는다. 만료됐거나 꺼진 것도 포함하고 status(active, disabled, upcoming, expired)로 구분한다. 템플릿을 관리할 때 쓴다. 답변을 쓸 때는 list_active_templates 를 쓴다.',
+      inputSchema: {},
+    },
+    async () => {
+      const today = todayKst(now())
+      return asText((await listTemplates(db)).map((t) => describeTemplate(t, today)))
+    },
+  )
+
+  server.registerTool(
     'list_replies',
     {
       description: '최근 답변 기록(초안, 전송됨, 실패)을 읽는다.',
@@ -101,6 +141,97 @@ export async function createMcpServer(deps: Deps) {
 
   // 읽기 전용이면 쓰기 도구를 아예 등록하지 않는다.
   if (!settings.readOnly) {
+    const dateField = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD 형식이어야 한다')
+    const templateNote =
+      '템플릿 body 는 유저에게 그대로 보내는 문구가 아니라 답변을 쓸 때 참고하는 가이드다. ' +
+      '자동 전송 허용(autoSend)은 여기서 켜거나 바꿀 수 없다. 사람이 대시보드에서만 정한다. ' +
+      '기간을 비우면 계속 유효하고, 종료일은 그날 끝까지 유효하다.'
+
+    server.registerTool(
+      'save_template',
+      {
+        description: `새 답변 템플릿을 만든다. ${templateNote} 만든 템플릿은 autoSend 가 꺼진 상태다.`,
+        inputSchema: {
+          title: z.string().min(1).describe('상황 이름. 예: 환불 문의'),
+          situation: z.string().min(1).describe('이 가이드를 쓸 상황 설명. 답변할 때 이 설명을 보고 고른다'),
+          body: z.string().min(1).describe('답변 가이드'),
+          challengeId: z.number().int().optional().describe('비우면 모든 챌린지'),
+          validFrom: dateField.optional().describe('시작일. 비우면 처음부터'),
+          validUntil: dateField.optional().describe('종료일. 비우면 계속'),
+          priority: z.number().int().default(0).describe('클수록 먼저 보인다'),
+        },
+      },
+      async (a) => {
+        if (a.validFrom && a.validUntil && a.validFrom > a.validUntil) return asText({ ok: false, reason: '시작일이 종료일보다 늦다' }, true)
+        const t = await createTemplate(
+          db,
+          {
+            title: a.title.trim(),
+            situation: a.situation.trim(),
+            body: a.body.trim(),
+            challengeId: a.challengeId ?? null,
+            validFrom: a.validFrom ?? null,
+            validUntil: a.validUntil ?? null,
+            autoSend: false,
+            priority: a.priority,
+          },
+          now(),
+        )
+        return asText({ ok: true, template: describeTemplate(t, todayKst(now())) })
+      },
+    )
+
+    server.registerTool(
+      'update_template',
+      {
+        description: `템플릿을 고친다. 준 항목만 바뀐다. challengeId, validFrom, validUntil 은 null 을 주면 비운다. ${templateNote}`,
+        inputSchema: {
+          id: z.number().int(),
+          title: z.string().min(1).optional(),
+          situation: z.string().min(1).optional(),
+          body: z.string().min(1).optional(),
+          challengeId: z.number().int().nullable().optional(),
+          validFrom: dateField.nullable().optional(),
+          validUntil: dateField.nullable().optional(),
+          priority: z.number().int().optional(),
+          enabled: z.boolean().optional().describe('false 면 끈다. 켜 두면 기간 안에서만 쓰인다'),
+        },
+      },
+      async (a) => {
+        const cur = await getTemplate(db, a.id)
+        if (!cur) return asText({ ok: false, reason: '그 id 의 템플릿이 없다' }, true)
+        const next = {
+          title: a.title?.trim() ?? cur.title,
+          situation: a.situation?.trim() ?? cur.situation,
+          body: a.body?.trim() ?? cur.body,
+          challengeId: a.challengeId === undefined ? cur.challengeId : a.challengeId,
+          validFrom: a.validFrom === undefined ? cur.validFrom : a.validFrom,
+          validUntil: a.validUntil === undefined ? cur.validUntil : a.validUntil,
+          autoSend: cur.autoSend, // 자동 전송 여부는 사람만 바꾼다
+          priority: a.priority ?? cur.priority,
+        }
+        if (next.validFrom && next.validUntil && next.validFrom > next.validUntil) {
+          return asText({ ok: false, reason: '시작일이 종료일보다 늦다' }, true)
+        }
+        let t = (await updateTemplate(db, a.id, next, now()))!
+        if (a.enabled !== undefined) t = (await setTemplateEnabled(db, a.id, a.enabled, now()))!
+        return asText({ ok: true, template: describeTemplate(t, todayKst(now())) })
+      },
+    )
+
+    server.registerTool(
+      'delete_template',
+      {
+        description: '템플릿을 지운다. 지운 템플릿은 되돌릴 수 없다. 잠시 쓰지 않으려면 update_template 로 enabled=false 를 준다.',
+        inputSchema: { id: z.number().int() },
+      },
+      async ({ id }) => {
+        if (!(await getTemplate(db, id))) return asText({ ok: false, reason: '그 id 의 템플릿이 없다' }, true)
+        await deleteTemplate(db, id)
+        return asText({ ok: true })
+      },
+    )
+
     server.registerTool(
       'reply_question',
       {
