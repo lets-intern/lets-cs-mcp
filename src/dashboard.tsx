@@ -166,14 +166,14 @@ export function dashboard(d: DashboardDeps) {
   app.get('/', async (c) => {
     const deps = await d.getDeps()
     const today = todayKst(deps.now())
-    const settings = await getSettings(deps.db)
-    const stats = {
-      activeTemplates: (await listActiveTemplates(deps.db, today)).length,
-      drafts: await countDrafts(deps.db),
-      sentToday: await countRepliesToday(deps.db, today, 'sent'),
-      debugToday: await countRepliesToday(deps.db, today, 'simulated'),
-      maxSendPerDay: settings.maxSendPerDay,
-    }
+    const [settings, activeTemplates, drafts, sentToday, debugToday] = await Promise.all([
+      getSettings(deps.db),
+      listActiveTemplates(deps.db, today),
+      countDrafts(deps.db),
+      countRepliesToday(deps.db, today, 'sent'),
+      countRepliesToday(deps.db, today, 'simulated'),
+    ])
+    const stats = { activeTemplates: activeTemplates.length, drafts, sentToday, debugToday, maxSendPerDay: settings.maxSendPerDay }
     return c.html(<HomePage stats={stats} settings={settings} />)
   })
 

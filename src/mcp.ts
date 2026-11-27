@@ -227,6 +227,14 @@ export async function createMcpServer(deps: Deps) {
     },
     async () => {
       const today = todayKst(now())
+      // 질의마다 DB 왕복이 있어서 한꺼번에 보낸다
+      const [templates, policies, pendingDrafts, sentToday, debugRecordsToday] = await Promise.all([
+        listActiveTemplates(db, today),
+        listPolicyDocs(db),
+        countDrafts(db),
+        countRepliesToday(db, today, 'sent'),
+        countRepliesToday(db, today, 'simulated'),
+      ])
       return asText({
         today,
         modes: {
@@ -235,11 +243,11 @@ export async function createMcpServer(deps: Deps) {
           autoSendEnabled: settings.autoSendEnabled,
           maxSendPerDay: settings.maxSendPerDay,
         },
-        activeTemplates: (await listActiveTemplates(db, today)).length,
-        policyDocs: (await listPolicyDocs(db)).length,
-        pendingDrafts: await countDrafts(db),
-        sentToday: await countRepliesToday(db, today, 'sent'),
-        debugRecordsToday: await countRepliesToday(db, today, 'simulated'),
+        activeTemplates: templates.length,
+        policyDocs: policies.length,
+        pendingDrafts,
+        sentToday,
+        debugRecordsToday,
       })
     },
   )
