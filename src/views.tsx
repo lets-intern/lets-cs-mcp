@@ -5,12 +5,20 @@ import { templateStatus, type Reply, type Settings, type Template, type Template
 const css = `
 *{box-sizing:border-box;border-radius:0}
 body{margin:0;font:14px/1.6 ui-monospace,Menlo,Consolas,monospace;color:#000;background:#fff}
-main{max-width:960px;margin:0 auto;padding:16px}
+main{max-width:1100px;margin:0 auto;padding:16px}
 nav{display:flex;border:2px solid #000}
 nav a,nav button{padding:8px 16px;color:#000;text-decoration:none;border:0;border-right:2px solid #000;background:#fff;font:inherit;cursor:pointer}
 nav a.on,nav a:hover,nav button:hover{background:#000;color:#fff}
 nav form{margin:0 0 0 auto;display:flex}
 nav form button{border-right:0;border-left:2px solid #000}
+.shell{display:flex;gap:16px;align-items:flex-start;margin-top:16px}
+.side{width:200px;flex-shrink:0;border:2px solid #000}
+.side a{display:block;padding:8px 12px;color:#000;text-decoration:none;border-bottom:1px solid #000}
+.side a:last-child{border-bottom:0}
+.side a.on,.side a:hover{background:#000;color:#fff}
+.content{flex:1;min-width:0}
+.content>.box:first-child{margin-top:0}
+@media(max-width:720px){.shell{flex-direction:column}.side{width:100%;display:flex;flex-wrap:wrap}.side a{border-bottom:0;border-right:1px solid #000}}
 .box{border:2px solid #000;margin:16px 0;background:#fff}
 .box>h2,.box>header{margin:0;padding:6px 12px;background:#000;color:#fff;font-size:14px;font-weight:normal;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .in{padding:12px}
@@ -51,35 +59,103 @@ document.addEventListener('click',function(e){
 });
 `
 
-type Tab = 'home' | 'templates' | 'debug' | 'log'
+// 상단은 섹션, 왼쪽은 그 섹션의 하위 메뉴다.
+type Section = { key: string; label: string; href: string; subs: { href: string; label: string }[] }
 
-export const Layout: FC<PropsWithChildren<{ title: string; active?: Tab }>> = ({ title, active, children }) => (
-  <html lang="ko">
-    <head>
-      <meta charset="utf-8" />
-      <meta name="viewport" content="width=device-width,initial-scale=1" />
-      <meta name="robots" content="noindex" />
-      <title>{title} - lets-cs</title>
-      <style dangerouslySetInnerHTML={{ __html: css }} />
-      <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-    </head>
-    <body>
-      <main>
-        {active ? (
-          <nav>
-            <a href="/" class={active === 'home' ? 'on' : ''}>대시보드</a>
-            <a href="/templates" class={active === 'templates' ? 'on' : ''}>템플릿</a>
-            <a href="/debug" class={active === 'debug' ? 'on' : ''}>디버깅</a>
-            <a href="/log" class={active === 'log' ? 'on' : ''}>기록</a>
-            <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
-          </nav>
-        ) : null}
-        {children}
-      </main>
-      <script dangerouslySetInnerHTML={{ __html: script }} />
-    </body>
-  </html>
-)
+const SECTIONS: Section[] = [
+  { key: 'home', label: '대시보드', href: '/', subs: [{ href: '/', label: '현황' }] },
+  {
+    key: 'connect',
+    label: '연결',
+    href: '/connect',
+    subs: [
+      { href: '/connect', label: '서버 주소와 키' },
+      { href: '/connect/config', label: 'Claude 설정' },
+      { href: '/connect/prompt', label: '예약 실행 프롬프트' },
+    ],
+  },
+  {
+    key: 'settings',
+    label: '설정',
+    href: '/settings',
+    subs: [
+      { href: '/settings', label: '동작 모드' },
+      { href: '/settings/send', label: '전송 설정' },
+      { href: '/settings/env', label: '환경' },
+    ],
+  },
+  {
+    key: 'templates',
+    label: '템플릿',
+    href: '/templates',
+    subs: [
+      { href: '/templates', label: '목록' },
+      { href: '/templates/new', label: '새 템플릿' },
+    ],
+  },
+  {
+    key: 'debug',
+    label: '디버깅',
+    href: '/debug',
+    subs: [
+      { href: '/debug', label: '경과 요약' },
+      { href: '/debug/records', label: '기록 목록' },
+    ],
+  },
+  {
+    key: 'log',
+    label: '기록',
+    href: '/log',
+    subs: [
+      { href: '/log', label: '전체' },
+      { href: '/log/drafts', label: '초안' },
+    ],
+  },
+]
+
+// path 는 지금 보고 있는 하위 메뉴의 주소다. 없으면 메뉴 없이 그린다(로그인).
+export const Layout: FC<PropsWithChildren<{ title: string; path?: string }>> = ({ title, path, children }) => {
+  const section = path ? SECTIONS.find((sec) => sec.subs.some((sub) => sub.href === path)) : undefined
+  return (
+    <html lang="ko">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <meta name="robots" content="noindex" />
+        <title>{title} - lets-cs</title>
+        <style dangerouslySetInnerHTML={{ __html: css }} />
+        <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+      </head>
+      <body>
+        <main>
+          {section ? (
+            <>
+              <nav>
+                {SECTIONS.map((sec) => (
+                  <a href={sec.href} class={sec.key === section.key ? 'on' : ''}>{sec.label}</a>
+                ))}
+                <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
+              </nav>
+              <div class="shell">
+                {section.subs.length > 1 ? (
+                  <aside class="side">
+                    {section.subs.map((sub) => (
+                      <a href={sub.href} class={sub.href === path ? 'on' : ''}>{sub.label}</a>
+                    ))}
+                  </aside>
+                ) : null}
+                <div class="content">{children}</div>
+              </div>
+            </>
+          ) : (
+            children
+          )}
+        </main>
+        <script dangerouslySetInnerHTML={{ __html: script }} />
+      </body>
+    </html>
+  )
+}
 
 export const LoginPage: FC<{ error?: boolean }> = ({ error }) => (
   <Layout title="로그인">
@@ -180,14 +256,11 @@ export const SCHEDULE_PROMPT = [
   '6. 마지막에 답변한 문의, 건너뛴 문의와 그 이유를 짧게 보고한다.',
 ].join('\n')
 
-export const ConnectBox: FC<{ origin: string; token: string }> = ({ origin, token }) => {
+export const ConnectKeyBox: FC<{ origin: string; token: string }> = ({ origin, token }) => {
   const url = `${origin}/mcp`
-  const cli = (k: string) => `claude mcp add --transport http lets-cs ${url} --header "Authorization: Bearer ${k}"`
-  const json = (k: string) =>
-    JSON.stringify({ mcpServers: { 'lets-cs': { type: 'http', url, headers: { Authorization: `Bearer ${k}` } } } }, null, 2)
   return (
-    <section class="box" id="connect-box">
-      <h2>MCP 연결</h2>
+    <section class="box">
+      <h2>서버 주소와 키</h2>
       <div class="in">
         <Copyable label="서버 주소" shown={url} text={url} />
         <label>키 (MCP_AUTH_TOKEN)</label>
@@ -198,14 +271,37 @@ export const ConnectBox: FC<{ origin: string; token: string }> = ({ origin, toke
           <button data-reveal="key-view">보기</button>
           <button data-copy={token}>키 복사</button>
         </div>
-        <div class="muted" />
-        <Copyable label="Claude Code 에 추가" shown={cli(mask(token))} text={cli(token)} />
-        <Copyable label=".mcp.json 설정" shown={json(mask(token))} text={json(token)} />
-        <Copyable label="클라우드 예약 실행 프롬프트" shown={SCHEDULE_PROMPT} text={SCHEDULE_PROMPT} />
+        <p class="muted">호출할 때 Authorization: Bearer 키 헤더로 보낸다. 키는 환경 변수 MCP_AUTH_TOKEN 이다.</p>
       </div>
     </section>
   )
 }
+
+export const ConnectConfigBox: FC<{ origin: string; token: string }> = ({ origin, token }) => {
+  const url = `${origin}/mcp`
+  const cli = (k: string) => `claude mcp add --transport http lets-cs ${url} --header "Authorization: Bearer ${k}"`
+  const json = (k: string) =>
+    JSON.stringify({ mcpServers: { 'lets-cs': { type: 'http', url, headers: { Authorization: `Bearer ${k}` } } } }, null, 2)
+  return (
+    <section class="box">
+      <h2>Claude 설정</h2>
+      <div class="in">
+        <Copyable label="Claude Code 에 추가" shown={cli(mask(token))} text={cli(token)} />
+        <Copyable label=".mcp.json 설정" shown={json(mask(token))} text={json(token)} />
+        <p class="muted">화면에는 키가 가려져 있고, 복사하면 실제 키가 들어간다.</p>
+      </div>
+    </section>
+  )
+}
+
+export const PromptBox: FC = () => (
+  <section class="box">
+    <h2>클라우드 예약 실행 프롬프트</h2>
+    <div class="in">
+      <Copyable label="예약 실행에 붙여 넣는다" shown={SCHEDULE_PROMPT} text={SCHEDULE_PROMPT} />
+    </div>
+  </section>
+)
 
 export const SettingsBox: FC<{ settings: Settings; saved?: boolean }> = ({ settings, saved }) => (
   <section class="box" id="settings-box">
@@ -308,14 +404,21 @@ export const TemplateForm: FC<{ t?: Template }> = ({ t }) => {
 }
 
 export const TemplatesPage: FC<{ templates: Template[]; today: string }> = ({ templates, today }) => (
-  <Layout title="템플릿" active="templates">
-    <TemplateForm />
-    <div id="tpl-list">
-      {templates.map((t) => <TemplateItem t={t} today={today} />)}
-    </div>
+  <Layout title="템플릿" path="/templates">
+    {templates.length === 0 ? (
+      <section class="box"><div class="in"><p>템플릿이 없다. 새 템플릿 메뉴에서 만든다.</p></div></section>
+    ) : (
+      templates.map((t) => <TemplateItem t={t} today={today} />)
+    )}
   </Layout>
 )
 
+export const TemplatesNewPage: FC = () => (
+  <Layout title="새 템플릿" path="/templates/new">
+    <TemplateForm />
+    <div id="tpl-list" />
+  </Layout>
+)
 
 const DAY_OPTIONS = [7, 14, 30]
 
@@ -325,58 +428,72 @@ const count = (items: string[]) => {
   return [...m.entries()].sort((a, b) => b[1] - a[1])
 }
 
-export const DebugPage: FC<{ records: Reply[]; days: number; debugMode: boolean; since: string }> = ({ records, days, debugMode, since }) => {
+const DaysBar: FC<{ base: string; days: number }> = ({ base, days }) => (
+  <div class="actions">
+    {DAY_OPTIONS.map((d) => (
+      <a class={`btn${d === days ? ' on' : ''}`} href={`${base}?days=${d}`}>최근 {d}일</a>
+    ))}
+  </div>
+)
+
+export const DebugSummaryPage: FC<{ records: Reply[]; days: number; debugMode: boolean; since: string }> = ({ records, days, debugMode, since }) => {
   const byIntended = count(records.map((r) => (r.intended === 'send' ? '운영이었다면 자동 전송' : '운영이었다면 초안')))
   const byTemplate = count(records.map((r) => r.templateTitle ?? '템플릿 없이 작성'))
   const byDay = count(records.map((r) => r.updatedAt.slice(0, 10))).sort((a, b) => (a[0] < b[0] ? 1 : -1))
   return (
-    <Layout title="디버깅" active="debug">
+    <Layout title="디버깅 경과" path="/debug">
       <section class="box">
         <h2>
-          디버깅 경과 <span class="tag">{debugMode ? '디버깅 모드 켜짐' : '디버깅 모드 꺼짐'}</span>
+          경과 요약 <span class="tag">{debugMode ? '디버깅 모드 켜짐' : '디버깅 모드 꺼짐'}</span>
         </h2>
         <div class="in">
-          <div class="actions">
-            {DAY_OPTIONS.map((d) => (
-              <a class={`btn${d === days ? ' on' : ''}`} href={`/debug?days=${d}`}>최근 {d}일</a>
-            ))}
-          </div>
+          <DaysBar base="/debug" days={days} />
           <p>{since} 부터 기록 {records.length}건. 유저에게는 아무것도 보내지 않았다.</p>
-          {records.length > 0 ? (
-            <div class="stats">
-              <div class="box"><h2>운영이었다면</h2><div class="in">{byIntended.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
-              <div class="box"><h2>참고한 템플릿</h2><div class="in">{byTemplate.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
-              <div class="box"><h2>날짜별</h2><div class="in">{byDay.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
-            </div>
-          ) : null}
         </div>
       </section>
       {records.length === 0 ? (
         <section class="box"><div class="in"><p>이 기간에 디버깅 기록이 없다. 읽기 전용을 끄고 MCP 로 답변을 달면 여기에 쌓인다.</p></div></section>
       ) : (
-        records.map((r) => (
-          <article class="box">
-            <header>
-              <strong>문의 #{r.questionId}</strong>
-              <span class="tag">{r.updatedAt}</span>
-              <span class="tag">{r.challengeTitle ?? `챌린지 ${r.challengeId}`}</span>
-              {r.userName ? <span class="tag">{r.userName}</span> : null}
-              <span class="tag">{r.templateTitle ? `템플릿: ${r.templateTitle}` : '템플릿 없음'}</span>
-              <span class="tag">{r.intended === 'send' ? '운영이었다면 자동 전송' : '운영이었다면 초안'}</span>
-            </header>
-            <div class="in">
-              <p>문의: {r.questionTitle}</p>
-              <pre>{r.questionContent ?? '(문의 내용이 기록되지 않았다)'}</pre>
-              <p>단 답변 (유저에게 보내지 않음)</p>
-              <pre>{r.body}</pre>
-              {r.note ? <p>사유: {r.note}</p> : null}
-            </div>
-          </article>
-        ))
+        <div class="stats" style="grid-template-columns:repeat(3,1fr)">
+          <div class="box"><h2>운영이었다면</h2><div class="in">{byIntended.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
+          <div class="box"><h2>참고한 템플릿</h2><div class="in">{byTemplate.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
+          <div class="box"><h2>날짜별</h2><div class="in">{byDay.map(([k, n]) => <p>{k}: {n}</p>)}</div></div>
+        </div>
       )}
     </Layout>
   )
 }
+
+export const DebugRecordsPage: FC<{ records: Reply[]; days: number; since: string }> = ({ records, days, since }) => (
+  <Layout title="디버깅 기록" path="/debug/records">
+    <section class="box">
+      <h2>기록 목록</h2>
+      <div class="in">
+        <DaysBar base="/debug/records" days={days} />
+        <p>{since} 부터 {records.length}건. 단 답변은 유저에게 보내지 않았다.</p>
+      </div>
+    </section>
+    {records.map((r) => (
+      <article class="box">
+        <header>
+          <strong>문의 #{r.questionId}</strong>
+          <span class="tag">{r.updatedAt}</span>
+          <span class="tag">{r.challengeTitle ?? `챌린지 ${r.challengeId}`}</span>
+          {r.userName ? <span class="tag">{r.userName}</span> : null}
+          <span class="tag">{r.templateTitle ? `템플릿: ${r.templateTitle}` : '템플릿 없음'}</span>
+          <span class="tag">{r.intended === 'send' ? '운영이었다면 자동 전송' : '운영이었다면 초안'}</span>
+        </header>
+        <div class="in">
+          <p>문의: {r.questionTitle}</p>
+          <pre>{r.questionContent ?? '(문의 내용이 기록되지 않았다)'}</pre>
+          <p>단 답변 (유저에게 보내지 않음)</p>
+          <pre>{r.body}</pre>
+          {r.note ? <p>사유: {r.note}</p> : null}
+        </div>
+      </article>
+    ))}
+  </Layout>
+)
 
 // ---------- 기록 ----------
 
@@ -407,10 +524,10 @@ export const LogRow: FC<{ r: Reply; note?: string; canSend?: boolean }> = ({ r, 
   </tr>
 )
 
-export const LogPage: FC<{ replies: Reply[]; canSend: boolean }> = ({ replies, canSend }) => (
-  <Layout title="기록" active="log">
+export const LogPage: FC<{ replies: Reply[]; canSend: boolean; path: '/log' | '/log/drafts' }> = ({ replies, canSend, path }) => (
+  <Layout title={path === '/log' ? '전체 기록' : '초안'} path={path}>
     <section class="box">
-      <h2>답변 기록</h2>
+      <h2>{path === '/log' ? '전체 답변 기록' : '초안'}</h2>
       <div class="in">
         {replies.length === 0 ? (
           <p>기록이 없다</p>
@@ -427,20 +544,48 @@ export const LogPage: FC<{ replies: Reply[]; canSend: boolean }> = ({ replies, c
   </Layout>
 )
 
+// ---------- 대시보드와 설정, 연결 ----------
+
 export const HomePage: FC<{
   stats: { activeTemplates: number; drafts: number; sentToday: number; debugToday: number; maxSendPerDay: number }
   settings: Settings
-  origin: string
-  token: string
-  apiBase: string
-  dbKind: string
-}> = ({ stats, settings, origin, token, apiBase, dbKind }) => (
-  <Layout title="대시보드" active="home">
+}> = ({ stats, settings }) => (
+  <Layout title="대시보드" path="/">
+    <Stats {...stats} />
+    <section class="box">
+      <h2>현재 상태</h2>
+      <div class="in">
+        <p>
+          읽기 전용 <span class="tag">{settings.readOnly ? '켜짐' : '꺼짐'}</span> 디버깅 모드{' '}
+          <span class="tag">{settings.debugMode ? '켜짐' : '꺼짐'}</span> 자동 전송{' '}
+          <span class="tag">{settings.autoSendEnabled ? '허용' : '꺼짐'}</span>
+        </p>
+        <p>{settings.debugMode ? '유저에게는 아무것도 나가지 않는다.' : '디버깅 모드가 꺼져 있다. 조건을 통과한 답변은 유저에게 나간다.'}</p>
+        <div class="actions"><a class="btn" href="/settings">설정에서 바꾼다</a></div>
+      </div>
+    </section>
+  </Layout>
+)
+
+export const ConnectPage: FC<{ origin: string; token: string }> = (p) => (
+  <Layout title="서버 주소와 키" path="/connect"><ConnectKeyBox {...p} /></Layout>
+)
+export const ConnectConfigPage: FC<{ origin: string; token: string }> = (p) => (
+  <Layout title="Claude 설정" path="/connect/config"><ConnectConfigBox {...p} /></Layout>
+)
+export const PromptPage: FC = () => (
+  <Layout title="예약 실행 프롬프트" path="/connect/prompt"><PromptBox /></Layout>
+)
+
+export const SettingsModePage: FC<{ settings: Settings }> = ({ settings }) => (
+  <Layout title="동작 모드" path="/settings">
     <ReadOnlyBox readOnly={settings.readOnly} />
     <DebugBox debugMode={settings.debugMode} />
-    <Stats {...stats} />
-    <ConnectBox origin={origin} token={token} />
-    <SettingsBox settings={settings} />
-    <InfoBox apiBase={apiBase} dbKind={dbKind} />
   </Layout>
+)
+export const SettingsSendPage: FC<{ settings: Settings }> = ({ settings }) => (
+  <Layout title="전송 설정" path="/settings/send"><SettingsBox settings={settings} /></Layout>
+)
+export const SettingsEnvPage: FC<{ apiBase: string; dbKind: string }> = (p) => (
+  <Layout title="환경" path="/settings/env"><InfoBox {...p} /></Layout>
 )

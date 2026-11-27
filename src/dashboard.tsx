@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { sign, verify } from 'hono/jwt'
 import { safeEqual } from './auth.js'
@@ -21,7 +21,27 @@ import {
   updateTemplate,
   type TemplateFields,
 } from './store.js'
-import { DebugBox, DebugPage, HomePage, LoginPage, LogPage, LogRow, ReadOnlyBox, SettingsBox, TemplateForm, TemplateItem, TemplatesPage } from './views.js'
+import {
+  ConnectConfigPage,
+  ConnectPage,
+  DebugBox,
+  DebugRecordsPage,
+  DebugSummaryPage,
+  HomePage,
+  LoginPage,
+  LogPage,
+  LogRow,
+  PromptPage,
+  ReadOnlyBox,
+  SettingsBox,
+  SettingsEnvPage,
+  SettingsModePage,
+  SettingsSendPage,
+  TemplateForm,
+  TemplateItem,
+  TemplatesNewPage,
+  TemplatesPage,
+} from './views.js'
 
 const COOKIE = 'cs_session'
 const WEEK = 7 * 24 * 60 * 60
@@ -106,17 +126,24 @@ export function dashboard(d: DashboardDeps) {
       debugToday: await countRepliesToday(deps.db, today, 'simulated'),
       maxSendPerDay: settings.maxSendPerDay,
     }
-    return c.html(
-      <HomePage
-        stats={stats}
-        settings={settings}
-        origin={new URL(c.req.url).origin}
-        token={d.authToken}
-        apiBase={d.apiBase}
-        dbKind={d.dbKind}
-      />,
-    )
+    return c.html(<HomePage stats={stats} settings={settings} />)
   })
+
+  const origin = (c: Context) => new URL(c.req.url).origin
+
+  app.get('/connect', (c) => c.html(<ConnectPage origin={origin(c)} token={d.authToken} />))
+  app.get('/connect/config', (c) => c.html(<ConnectConfigPage origin={origin(c)} token={d.authToken} />))
+  app.get('/connect/prompt', (c) => c.html(<PromptPage />))
+
+  app.get('/settings', async (c) => {
+    const { db } = await d.getDeps()
+    return c.html(<SettingsModePage settings={await getSettings(db)} />)
+  })
+  app.get('/settings/send', async (c) => {
+    const { db } = await d.getDeps()
+    return c.html(<SettingsSendPage settings={await getSettings(db)} />)
+  })
+  app.get('/settings/env', (c) => c.html(<SettingsEnvPage apiBase={d.apiBase} dbKind={d.dbKind} />))
 
   app.post('/settings/read-only', async (c) => {
     const { db } = await d.getDeps()
@@ -157,6 +184,8 @@ export function dashboard(d: DashboardDeps) {
     return c.html(<TemplateItem t={t} today={todayKst(now())} />)
   })
 
+  app.get('/templates/new', (c) => c.html(<TemplatesNewPage />))
+
   app.get('/templates/:id', async (c) => {
     const { db, now } = await d.getDeps()
     const t = await getTemplate(db, Number(c.req.param('id')))
@@ -192,20 +221,32 @@ export function dashboard(d: DashboardDeps) {
     return c.body('')
   })
 
-  app.get('/debug', async (c) => {
+  const debugWindow = async (c: Context) => {
     const { db, now } = await d.getDeps()
     const asked = Number(c.req.query('days'))
     const days = [7, 14, 30].includes(asked) ? asked : 14
     const since = todayKst(new Date(now().getTime() - (days - 1) * 24 * 60 * 60 * 1000))
-    const settings = await getSettings(db)
-    return c.html(<DebugPage records={await listDebugRecords(db, since)} days={days} debugMode={settings.debugMode} since={since} />)
+    return { db, days, since, records: await listDebugRecords(db, since) }
+  }
+
+  app.get('/debug', async (c) => {
+    const { db, days, since, records } = await debugWindow(c)
+    return c.html(<DebugSummaryPage records={records} days={days} since={since} debugMode={(await getSettings(db)).debugMode} />)
   })
 
-  app.get('/log', async (c) => {
+  app.get('/debug/records', async (c) => {
+    const { days, since, records } = await debugWindow(c)
+    return c.html(<DebugRecordsPage records={records} days={days} since={since} />)
+  })
+
+  const logPage = (path: '/log' | '/log/drafts') => async (c: Context) => {
     const { db } = await d.getDeps()
     const settings = await getSettings(db)
-    return c.html(<LogPage replies={await listReplies(db)} canSend={!settings.readOnly && !settings.debugMode} />)
-  })
+    const replies = await listReplies(db, 100, path === '/log/drafts' ? 'draft' : undefined)
+    return c.html(<LogPage replies={replies} canSend={!settings.readOnly && !settings.debugMode} path={path} />)
+  }
+  app.get('/log', logPage('/log'))
+  app.get('/log/drafts', logPage('/log/drafts'))
 
   app.post('/replies/:id/send', async (c) => {
     const deps = await d.getDeps()

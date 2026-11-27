@@ -250,8 +250,10 @@ export async function findOpenReply(db: Db, questionId: number): Promise<Reply |
   return res.rows[0] ? toReply(res.rows[0]) : null
 }
 
-export async function listReplies(db: Db, limit = 100): Promise<Reply[]> {
-  const res = await db.execute({ sql: 'SELECT * FROM replies ORDER BY id DESC LIMIT ?', args: [limit] })
+export async function listReplies(db: Db, limit = 100, status?: ReplyStatus): Promise<Reply[]> {
+  const res = status
+    ? await db.execute({ sql: 'SELECT * FROM replies WHERE status = ? ORDER BY id DESC LIMIT ?', args: [status, limit] })
+    : await db.execute({ sql: 'SELECT * FROM replies ORDER BY id DESC LIMIT ?', args: [limit] })
   return res.rows.map(toReply)
 }
 

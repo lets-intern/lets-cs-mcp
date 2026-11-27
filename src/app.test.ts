@@ -69,14 +69,41 @@ describe('대시보드', () => {
     expect(bad.status).toBe(401)
   })
 
-  it('로그인하면 MCP 주소, 키, 읽기 전용 버튼이 보인다', async () => {
+  it('상단에는 섹션, 왼쪽에는 그 섹션의 하위 메뉴가 놓인다', async () => {
     const { app } = await setup()
     const cookie = await login(app)
-    const html = await (await app.request('http://dash.test/', { headers: { cookie } })).text()
-    expect(html).toContain('http://dash.test/mcp')
-    expect(html).toContain('data-copy="secret"')
-    expect(html).toContain('읽기 전용 모드')
-    expect(html).toContain('읽기 전용 끄기')
+    const get = async (path: string) => {
+      const res = await app.request(`http://dash.test${path}`, { headers: { cookie } })
+      expect(res.status, path).toBe(200)
+      return res.text()
+    }
+
+    const home = await get('/')
+    for (const label of ['대시보드', '연결', '설정', '템플릿', '디버깅', '기록']) expect(home).toContain(`>${label}</a>`)
+    expect(home).not.toContain('class="side"') // 하위 메뉴가 하나뿐인 섹션은 왼쪽 메뉴를 그리지 않는다
+    expect(home).not.toContain('data-copy="secret"') // 첫 페이지에 키를 두지 않는다
+
+    const connect = await get('/connect')
+    expect(connect).toContain('class="side"')
+    for (const label of ['서버 주소와 키', 'Claude 설정', '예약 실행 프롬프트']) expect(connect).toContain(`>${label}</a>`)
+    expect(connect).toContain('http://dash.test/mcp')
+    expect(connect).toContain('data-copy="secret"')
+
+    const config = await get('/connect/config')
+    expect(config).toContain('claude mcp add --transport http lets-cs http://dash.test/mcp')
+    expect(await get('/connect/prompt')).toContain('lets-cs MCP 로 챌린지 문의를 처리한다')
+
+    const mode = await get('/settings')
+    expect(mode).toContain('읽기 전용 모드')
+    expect(mode).toContain('디버깅 모드')
+    expect(mode).toContain('읽기 전용 끄기')
+    expect(await get('/settings/send')).toContain('하루 전송 상한')
+    expect(await get('/settings/env')).toContain('http://lets.test')
+
+    const templates = await get('/templates')
+    expect(templates).toContain('>새 템플릿</a>')
+    expect(await get('/templates/new')).toContain('새 템플릿 (답변 가이드)')
+    for (const path of ['/debug', '/debug/records', '/log', '/log/drafts']) await get(path)
   })
 
   it('읽기 전용 버튼이 설정을 바꾼다', async () => {
@@ -126,7 +153,7 @@ describe('대시보드', () => {
     expect((await getSettings(db)).debugMode).toBe(true)
   })
 
-  it('디버깅 탭에 문의, 템플릿, 쓴 답변, 운영이었다면의 결과가 쌓여 보인다', async () => {
+  it('디버깅 경과에 문의, 템플릿, 쓴 답변, 운영이었다면의 결과가 쌓여 보인다', async () => {
     const { app, deps, saved } = await setup()
     const { submitReply } = await import('./reply.js')
     const { createTemplate } = await import('./store.js')
@@ -143,16 +170,19 @@ describe('대시보드', () => {
     )
     await submitReply(deps, { challengeId: 10, questionId: 1, body: '부분 환불만 가능합니다', templateId: t.id, mode: 'send' })
 
-    const page = await (await app.request('/debug', { headers: { cookie } })).text()
-    expect(page).toContain('환불하고 싶어요')
-    expect(page).toContain('템플릿: 환불 안내')
-    expect(page).toContain('부분 환불만 가능합니다')
-    expect(page).toContain('운영이었다면 자동 전송')
-    expect(page).toContain('유저에게는 아무것도 보내지 않았다')
+    const summary = await (await app.request('/debug', { headers: { cookie } })).text()
+    expect(summary).toContain('기록 1건')
+    expect(summary).toContain('환불 안내: 1')
+    expect(summary).toContain('운영이었다면 자동 전송: 1')
+    expect(summary).toContain('유저에게는 아무것도 보내지 않았다')
+
+    const records = await (await app.request('/debug/records', { headers: { cookie } })).text()
+    expect(records).toContain('환불하고 싶어요')
+    expect(records).toContain('템플릿: 환불 안내')
+    expect(records).toContain('부분 환불만 가능합니다')
     expect(saved).toHaveLength(0)
 
-    const week = await app.request('/debug?days=7', { headers: { cookie } })
-    expect(week.status).toBe(200)
+    expect((await app.request('/debug?days=7', { headers: { cookie } })).status).toBe(200)
   })
 
   it('기록 화면에서 초안을 보낼 수 있다', async () => {
