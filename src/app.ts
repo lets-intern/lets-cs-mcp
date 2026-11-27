@@ -70,13 +70,16 @@ export function createAppFromEnv() {
   const dashboardPassword = process.env.DASHBOARD_PASSWORD
   if (!authToken || !dashboardPassword) throw new Error('MCP_AUTH_TOKEN, DASHBOARD_PASSWORD 가 필요하다')
   const env = readEnv()
-  const dbUrl = process.env.TURSO_DATABASE_URL ?? 'file:local.db'
+  // CS_DB_* 가 있으면 먼저 쓴다. Vercel 의 Turso 연동은 배포마다 브랜치 DB 를 만들어 TURSO_* 를 그 브랜치로 바꿔서,
+  // 거기에 쓴 데이터가 다음 배포에서 사라진다. 고정된 원본 DB 를 가리키려고 따로 둔 이름이다.
+  const dbUrl = process.env.CS_DB_URL ?? process.env.TURSO_DATABASE_URL ?? 'file:local.db'
+  const dbToken = process.env.CS_DB_TOKEN ?? process.env.TURSO_AUTH_TOKEN
   // Vercel 의 파일 시스템은 쓸 수 없다. 로컬 파일로 조용히 떨어지지 않게 막는다.
   const openConfiguredDb = () => {
     if (process.env.VERCEL && dbUrl.startsWith('file:')) {
       return Promise.reject(new Error('TURSO_DATABASE_URL 이 설정되지 않았다. Vercel 에서는 로컬 파일 DB 를 쓸 수 없다'))
     }
-    return openDb(dbUrl, process.env.TURSO_AUTH_TOKEN)
+    return openDb(dbUrl, dbToken)
   }
   return createApp({
     authToken,
