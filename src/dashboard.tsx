@@ -1,0 +1,227 @@
+import { Hono } from 'hono'
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
+import { sign, verify } from 'hono/jwt'
+import { safeEqual } from './auth.js'
+import { todayKst } from './dates.js'
+import { discardDraft, renderTemplate, sendDraft, withFooter, type Deps } from './reply.js'
+import {
+  countDrafts,
+  countRepliesToday,
+  createTemplate,
+  deleteTemplate,
+  getReply,
+  getSettings,
+  getTemplate,
+  listActiveTemplates,
+  listReplies,
+  listTemplates,
+  saveSettings,
+  setTemplateEnabled,
+  updateTemplate,
+  type TemplateFields,
+} from './store.js'
+import { DryRunBox, HomePage, LoginPage, LogPage, LogRow, ReadOnlyBox, SettingsBox, TemplateForm, TemplateItem, TemplatePreview, TemplatesPage } from './views'
+
+const COOKIE = 'cs_session'
+const WEEK = 7 * 24 * 60 * 60
+
+export type DashboardDeps = {
+  authToken: string
+  dashboardPassword: string
+  getDeps: () => Promise<Deps>
+  apiBase: string
+  dbKind: string
+}
+
+const dateOrNull = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null)
+const intOrNull = (v: unknown) => {
+  const n = typeof v === 'string' ? parseInt(v, 10) : NaN
+  return Number.isFinite(n) ? n : null
+}
+
+function parseTemplateForm(b: Record<string, unknown>): TemplateFields | null {
+  const title = String(b.title ?? '').trim()
+  const situation = String(b.situation ?? '').trim()
+  const body = String(b.body ?? '').trim()
+  if (!title || !situation || !body) return null
+  const validFrom = dateOrNull(b.validFrom)
+  const validUntil = dateOrNull(b.validUntil)
+  if (validFrom && validUntil && validFrom > validUntil) return null
+  return {
+    title,
+    situation,
+    body,
+    challengeId: intOrNull(b.challengeId),
+    validFrom,
+    validUntil,
+    autoSend: b.autoSend === 'on',
+    priority: intOrNull(b.priority) ?? 0,
+  }
+}
+
+export function dashboard(d: DashboardDeps) {
+  const app = new Hono()
+
+  app.get('/login', (c) => c.html(<LoginPage />))
+
+  app.post('/login', async (c) => {
+    const body = await c.req.parseBody()
+    if (!safeEqual(String(body.password ?? ''), d.dashboardPassword)) return c.html(<LoginPage error />, 401)
+    const token = await sign({ exp: Math.floor(Date.now() / 1000) + WEEK }, d.authToken)
+    setCookie(c, COOKIE, token, {
+      httpOnly: true,
+      sameSite: 'Lax',
+      secure: new URL(c.req.url).protocol === 'https:',
+      path: '/',
+      maxAge: WEEK,
+    })
+    return c.redirect('/')
+  })
+
+  app.post('/logout', (c) => {
+    deleteCookie(c, COOKIE, { path: '/' })
+    return c.redirect('/login')
+  })
+
+  app.use('*', async (c, next) => {
+    const token = getCookie(c, COOKIE)
+    const ok = token ? await verify(token, d.authToken, 'HS256').then(() => true, () => false) : false
+    if (ok) return next()
+    if (c.req.header('hx-request')) {
+      c.header('HX-Redirect', '/login')
+      return c.body(null, 401)
+    }
+    return c.redirect('/login')
+  })
+
+  app.get('/', async (c) => {
+    const deps = await d.getDeps()
+    const today = todayKst(deps.now())
+    const settings = await getSettings(deps.db)
+    const stats = {
+      activeTemplates: (await listActiveTemplates(deps.db, today)).length,
+      drafts: await countDrafts(deps.db),
+      sentToday: await countRepliesToday(deps.db, today, 'sent'),
+      simulatedToday: await countRepliesToday(deps.db, today, 'simulated'),
+      maxSendPerDay: settings.maxSendPerDay,
+    }
+    return c.html(
+      <HomePage
+        stats={stats}
+        settings={settings}
+        origin={new URL(c.req.url).origin}
+        token={d.authToken}
+        apiBase={d.apiBase}
+        dbKind={d.dbKind}
+      />,
+    )
+  })
+
+  app.post('/settings/read-only', async (c) => {
+    const { db } = await d.getDeps()
+    const body = await c.req.parseBody()
+    await saveSettings(db, { readOnly: body.value === '1' })
+    return c.html(<ReadOnlyBox readOnly={(await getSettings(db)).readOnly} />)
+  })
+
+  app.post('/settings/dry-run', async (c) => {
+    const { db } = await d.getDeps()
+    const body = await c.req.parseBody()
+    await saveSettings(db, { dryRun: body.value === '1' })
+    return c.html(<DryRunBox dryRun={(await getSettings(db)).dryRun} />)
+  })
+
+  app.post('/settings', async (c) => {
+    const { db } = await d.getDeps()
+    const body = await c.req.parseBody()
+    const max = Math.min(200, Math.max(1, intOrNull(body.maxSendPerDay) ?? 20))
+    await saveSettings(db, {
+      autoSendEnabled: body.autoSendEnabled === 'on',
+      maxSendPerDay: max,
+      answerFooter: String(body.answerFooter ?? ''),
+    })
+    return c.html(<SettingsBox settings={await getSettings(db)} saved />)
+  })
+
+  app.get('/templates', async (c) => {
+    const { db, now } = await d.getDeps()
+    return c.html(<TemplatesPage templates={await listTemplates(db)} today={todayKst(now())} />)
+  })
+
+  app.post('/templates', async (c) => {
+    const { db, now } = await d.getDeps()
+    const fields = parseTemplateForm(await c.req.parseBody())
+    if (!fields) return c.body(null, 400)
+    const t = await createTemplate(db, fields, now())
+    return c.html(<TemplateItem t={t} today={todayKst(now())} />)
+  })
+
+  app.get('/templates/:id', async (c) => {
+    const { db, now } = await d.getDeps()
+    const t = await getTemplate(db, Number(c.req.param('id')))
+    return t ? c.html(<TemplateItem t={t} today={todayKst(now())} />) : c.body(null, 404)
+  })
+
+  // 샘플 값으로 채워 실제 전송 문구가 어떻게 보일지 미리 본다. 아무것도 저장하지 않는다.
+  app.get('/templates/:id/preview', async (c) => {
+    const { db } = await d.getDeps()
+    const t = await getTemplate(db, Number(c.req.param('id')))
+    if (!t) return c.body(null, 404)
+    const { answerFooter } = await getSettings(db)
+    const sample = { userName: '홍길동', challengeTitle: '샘플 챌린지' }
+    return c.html(<TemplatePreview text={withFooter(renderTemplate(t.body, sample), answerFooter)} sample={sample} />)
+  })
+
+  app.get('/templates/:id/edit', async (c) => {
+    const { db } = await d.getDeps()
+    const t = await getTemplate(db, Number(c.req.param('id')))
+    return t ? c.html(<TemplateForm t={t} />) : c.body(null, 404)
+  })
+
+  app.put('/templates/:id', async (c) => {
+    const { db, now } = await d.getDeps()
+    const fields = parseTemplateForm(await c.req.parseBody())
+    if (!fields) return c.body(null, 400)
+    const t = await updateTemplate(db, Number(c.req.param('id')), fields, now())
+    return t ? c.html(<TemplateItem t={t} today={todayKst(now())} />) : c.body(null, 404)
+  })
+
+  app.post('/templates/:id/toggle', async (c) => {
+    const { db, now } = await d.getDeps()
+    const id = Number(c.req.param('id'))
+    const current = await getTemplate(db, id)
+    if (!current) return c.body(null, 404)
+    const t = await setTemplateEnabled(db, id, !current.enabled, now())
+    return c.html(<TemplateItem t={t!} today={todayKst(now())} />)
+  })
+
+  app.delete('/templates/:id', async (c) => {
+    const { db } = await d.getDeps()
+    await deleteTemplate(db, Number(c.req.param('id')))
+    return c.body('')
+  })
+
+  app.get('/log', async (c) => {
+    const { db } = await d.getDeps()
+    return c.html(<LogPage replies={await listReplies(db)} />)
+  })
+
+  app.post('/replies/:id/send', async (c) => {
+    const deps = await d.getDeps()
+    const id = Number(c.req.param('id'))
+    const result = await sendDraft(deps, id)
+    const reply = await getReply(deps.db, id)
+    if (!reply) return c.body('')
+    return c.html(<LogRow r={reply} note={result.ok ? undefined : result.reason} />)
+  })
+
+  app.post('/replies/:id/discard', async (c) => {
+    const deps = await d.getDeps()
+    const id = Number(c.req.param('id'))
+    await discardDraft(deps, id)
+    const reply = await getReply(deps.db, id)
+    return reply ? c.html(<LogRow r={reply} />) : c.body('')
+  })
+
+  return app
+}
